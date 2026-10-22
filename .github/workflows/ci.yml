@@ -1,0 +1,24 @@
+name: CI
+
+# Every push to every branch, plus every pull request. Note that push
+# events only fire in the repository that holds the branch: pushes to
+# fork branches run this workflow in the fork.
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: latest
+      - run: npm test

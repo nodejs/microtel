@@ -18,10 +18,15 @@
     "tracing",
     "diagnostics_channel"
   ],
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
   "engines": {
-    "node": ">=24.6.0"
+    "node": ">=26.9.0"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test 'test/test-*.js'",
+    "bench": "node --experimental-bench --bench 'benchmark/*.bench.js'"
   }
 }
