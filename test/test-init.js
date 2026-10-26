@@ -187,6 +187,30 @@ describe('otel init activation', () => {
     );
   });
 
+  it('filter accepts node:fetch as an alias for undici', async () => {
+    const { code, stdout } = await spawnMicrotel([
+      fixture('state-child.js'),
+      JSON.stringify([
+        {
+          endpoint: 'http://127.0.0.1:1',
+          filter: 'node:fetch',
+        },
+      ]),
+      'node:fetch,node:http',
+    ]);
+
+    assert.strictEqual(code, 0);
+    const lines = stdout.trim().split('\n');
+    assert.match(
+      lines.find((l) => l.startsWith('node:fetch:')),
+      /node:fetch:true/,
+    );
+    assert.match(
+      lines.find((l) => l.startsWith('node:http:')),
+      /node:http:false/,
+    );
+  });
+
   it('exclude disables modules without touching the rest', async () => {
     const { code, stdout } = await spawnMicrotel([
       fixture('state-child.js'),

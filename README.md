@@ -47,7 +47,7 @@ started. Invalid options throw.
 | `serviceName`    | string | `unknown_service:node`      | Service name in exported resource attributes. The default follows the OpenTelemetry [semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/trace/) for low-cardinality service names. |
 | `sdkName`        | string | `microtel`                   | `telemetry.sdk.name` resource attribute, and the name of the instrumentation scope on exported spans. |
 | `sdkVersion`    | string | this package's version      | `telemetry.sdk.version` resource attribute, and the scope version. |
-| `filter`         | string | all modules                  | Comma-separated list of modules to instrument. Supported values: `node:http`, `node:http/client`, `node:http/server`. |
+| `filter`         | string | all modules                  | Comma-separated list of modules to instrument. Supported values: `node:http`, `node:http/client`, `node:http/server`, and `node:undici`. `node:fetch` is an alias for `node:undici`: both cover all undici requests, including `fetch()`, and either one enables them. |
 | `exclude`        | string | none                         | Comma-separated list of modules to exclude from instrumentation. Same values as `filter`; takes precedence over it. |
 | `maxBufferSize`  | number | `100`                        | Number of spans buffered before an immediate flush is triggered. Must be a positive integer. |
 | `flushInterval`  | number | `10000`                      | Milliseconds between periodic flushes. Must be a positive integer. |
@@ -121,11 +121,14 @@ port that is not a decimal number is omitted.
 
 ### Undici/Fetch client
 
-Not implemented yet. The instrumentation subscribes to the
-`undici:request:*` diagnostics channels and produces one CLIENT span per
-request, with the same attributes as the HTTP client spans plus
-`server.port`; the plan is documented as a TODO in
-`lib/instrumentations.js`.
+A span with kind `CLIENT` is created for each outgoing request made via
+`fetch()` or undici's `request()`. Error status, `exception` event behavior,
+and span end timing are the same as for the HTTP client spans above. Requests
+that fail before they are dispatched, such as a refused connection, produce
+no span: the undici channels only fire once the request is underway. The
+injected `traceparent` replaces any caller-supplied value rather than
+appending to it, and a stale `tracestate` is removed when the span has none
+to inherit.
 
 Attributes set on undici/fetch client spans:
 
@@ -152,9 +155,8 @@ fresh trace is started instead. The `tracestate` header, when present, is
 attached to the span and forwarded verbatim to outgoing requests. It is never
 parsed or modified.
 * **Outgoing requests**: The `traceparent` header is injected into outgoing
-HTTP requests, together with the stored `tracestate` when one
-is present, enabling distributed tracing across services. Undici and
-fetch requests are covered once that instrumentation lands.
+HTTP and undici/fetch requests, together with the stored `tracestate` when
+one is present, enabling distributed tracing across services.
 
 ## Benchmarks
 
