@@ -218,6 +218,49 @@ describe('otel HTTP client spans', () => {
     );
   });
 
+  it('parses IPv6 authorities and default ports from the Host header', async () => {
+    const target = await startHTTPServer((req, res) => {
+      res.writeHead(200);
+      res.end('ok');
+    });
+
+    const seen = [];
+    const request = (headers, path) =>
+      new Promise((resolve, reject) => {
+        const req = http.get(
+          { host: '127.0.0.1', port: target.port, path, headers },
+          (res) => {
+            res.resume();
+            res.on('end', resolve);
+          },
+        );
+        req.on('error', reject);
+      });
+
+    // A bracketed IPv6 authority: the port follows the closing bracket.
+    await request({ Host: `[::1]:9999` }, '/ipv6');
+    // A portless Host header means the scheme default.
+    await request({ Host: 'example.test' }, '/default-port');
+
+    const spans = await flushAndCollect(collector);
+    await target.close();
+
+    const v6 = getClientSpan(spans, '/ipv6');
+    assert.ok(v6, 'Expected a client span for the IPv6 request');
+    assert.partialDeepStrictEqual(spanAttrs(v6), {
+      'server.port': '9999',
+      'url.full': 'http://[::1]:9999/ipv6',
+    });
+
+    const def = getClientSpan(spans, '/default-port');
+    assert.ok(def, 'Expected a client span for the portless Host request');
+    assert.strictEqual(
+      spanAttrs(def)['server.port'],
+      '80',
+      'A portless Host header must yield the scheme default',
+    );
+  });
+
   it('creates error span for HTTP client connection refused', async () => {
     await httpGet(1, '/fail').catch(() => {});
 

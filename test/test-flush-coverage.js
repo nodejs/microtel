@@ -5,7 +5,7 @@ const { after, afterEach, before, describe, it } = require('node:test');
 
 const { Span, SPAN_KIND_INTERNAL } = require('../lib/span');
 const { addSpan, flush, resetCaches } = require('../lib/flush');
-const { startTracing, delay } = require('./common/otel');
+const { startTracing, getSpans, delay } = require('./common/otel');
 
 describe('flush.js coverage', () => {
   let collector;
@@ -22,12 +22,51 @@ describe('flush.js coverage', () => {
   });
 
   it('flush is a no-op when buffer is empty', async () => {
+    const before = collector.requests.length;
+
     flush();
 
     // Wait for any potential export request.
     await delay(100);
 
-    assert.strictEqual(collector.requests.length, 0);
+    assert.strictEqual(collector.requests.length, before);
+  });
+
+  it('encodes boolean, double, and fallback attribute values', async () => {
+    // A span-like object covering the OTLP encodings the instrumentations
+    // never produce: booleans, non-integer numbers, and values of other
+    // types, which fall back to strings.
+    const span = {
+      name: 'mixed-values',
+      traceId: 'a'.repeat(32),
+      spanId: 'b'.repeat(16),
+      kind: 1,
+      startTime: 100,
+      endTime: 200,
+      getAttributes() {
+        return {
+          bool: true,
+          ratio: 1.5,
+          misc: null,
+        };
+      },
+      getEvents() {
+        return [];
+      },
+      status: { code: 0, message: '' },
+    };
+
+    addSpan(span);
+    flush();
+
+    const payload = await collector.next();
+    const attrs = {};
+    for (const a of getSpans(payload)[0].attributes) {
+      attrs[a.key] = a.value;
+    }
+    assert.deepStrictEqual(attrs.bool, { boolValue: true });
+    assert.deepStrictEqual(attrs.ratio, { doubleValue: 1.5 });
+    assert.deepStrictEqual(attrs.misc, { stringValue: 'null' });
   });
 
   it('flush handles spanToOtlp errors gracefully', async () => {
@@ -95,6 +134,8 @@ describe('flush.js coverage', () => {
   });
 
   it('resetCaches clears the span buffer', async () => {
+    const before = collector.requests.length;
+
     // A span so the buffer is non-empty.
     const span = new Span('test', SPAN_KIND_INTERNAL);
     span.end();
@@ -106,6 +147,6 @@ describe('flush.js coverage', () => {
     // Wait for any potential export request.
     await delay(100);
 
-    assert.strictEqual(collector.requests.length, 0);
+    assert.strictEqual(collector.requests.length, before);
   });
 });

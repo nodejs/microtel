@@ -3,7 +3,13 @@
 const assert = require('node:assert');
 const http = require('node:http');
 const { describe, it } = require('node:test');
-const { fixture, spawnMicrotel } = require('./common/otel');
+const { flush } = require('../lib/flush');
+const {
+  fixture,
+  httpGet,
+  startHTTPServer,
+  spawnMicrotel,
+} = require('./common/otel');
 
 // This test verifies exporter error handling and process lifecycle behavior.
 // Tracing is activated in the child processes through the public init() API;
@@ -11,6 +17,39 @@ const { fixture, spawnMicrotel } = require('./common/otel');
 // argv.
 
 describe('otel exporter behavior', () => {
+  it('warns when the collector responds non-2xx', async () => {
+    // An in-process collector that rejects every export with a 500. The
+    // spans are dropped, and a throttled OTelExportWarning reports it.
+    const collector = http.createServer((req, res) => {
+      res.writeHead(500);
+      res.end();
+    });
+    await new Promise((resolve) => collector.listen(0, '127.0.0.1', resolve));
+
+    const warningPromise = new Promise((resolve) => {
+      process.on('warning', function onWarning(w) {
+        if (w.name === 'OTelExportWarning') {
+          process.removeListener('warning', onWarning);
+          resolve(w);
+        }
+      });
+    });
+
+    const { start } = require('../lib/core');
+    start({ endpoint: `http://127.0.0.1:${collector.address().port}` });
+
+    const target = await startHTTPServer();
+    await httpGet(target.port, '/x');
+    flush();
+
+    const warning = await warningPromise;
+
+    await collector.close();
+    await target.close();
+
+    assert.match(warning.message, /HTTP 500/);
+  });
+
   it('does not crash when collector is unreachable', async () => {
     // The child traces a request against its own server and flushes to a
     // dead endpoint. The export fails, but the child exits normally.
