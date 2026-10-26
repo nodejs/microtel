@@ -27,6 +27,10 @@
   },
   "scripts": {
     "test": "node --test 'test/test-*.js'",
-    "bench": "node --experimental-bench --bench 'benchmark/*.bench.js'"
+    "bench": "node --experimental-bench --bench 'benchmark/*.bench.js'",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "3.9.10"
   }
 }
