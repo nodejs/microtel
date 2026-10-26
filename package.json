@@ -31,6 +31,7 @@
     "format:check": "prettier --check ."
   },
   "devDependencies": {
+    "@opentelemetry/semantic-conventions": "1.43.0",
     "prettier": "3.9.10"
   }
 }

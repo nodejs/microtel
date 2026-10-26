@@ -48,6 +48,7 @@ describe('otel HTTP server spans', () => {
 
     assert.partialDeepStrictEqual(spanAttrs(serverSpan), {
       'http.request.method': 'GET',
+      'server.address': '127.0.0.1',
       'url.path': '/test-path',
       'http.response.status_code': '200',
     });

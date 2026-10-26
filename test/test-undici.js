@@ -64,7 +64,7 @@ describe('otel undici spans', () => {
 
       assert.partialDeepStrictEqual(spanAttrs(clientSpan), {
         'http.request.method': 'GET',
-        'server.address': `http://127.0.0.1:${target.port}`,
+        'server.address': '127.0.0.1',
         'server.port': String(target.port),
         'url.full': `http://127.0.0.1:${target.port}/fetch-test`,
         'http.response.status_code': '200',

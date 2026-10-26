@@ -88,7 +88,7 @@ Attributes set on server spans:
 | `url.path`                  | Request URL path (without query) | Always                        |
 | `url.query`                 | Query string (without `?`)       | When query string is present  |
 | `url.scheme`                | `http` or `https`                | Always                        |
-| `server.address`            | Host header value                | When `Host` header is present |
+| `server.address`            | Requested host, without the port | When `Host` header is present |
 | `network.protocol.version`  | HTTP version (e.g. `1.1`)        | Always                        |
 | `http.response.status_code` | Response status code             | When response finishes        |
 | `error.type`                | HTTP status code as string       | On 5xx responses              |
@@ -136,7 +136,7 @@ Attributes set on undici/fetch client spans:
 | --------------------------- | ------------------------- | ------------------------- |
 | `http.request.method`       | HTTP method               | Always                    |
 | `url.full`                  | Full request URL          | Always                    |
-| `server.address`            | Target origin             | Always                    |
+| `server.address`            | Target host               | Always                    |
 | `server.port`               | Target port               | Always                    |
 | `http.response.status_code` | Response status code      | When response is received |
 | `error.type`                | Status code or error name | On 4xx/5xx or errors      |
