@@ -129,6 +129,61 @@ describe('otel HTTP client spans', () => {
     );
   });
 
+  // Node has already stored the headers when the request is created with
+  // array headers or an Expect header, so injection is skipped rather than
+  // throwing ERR_HTTP_HEADERS_SENT.
+  for (const [title, path, getHeaders] of [
+    // Node adds no default Host header to array headers.
+    [
+      'array headers',
+      '/array-headers',
+      (port) => ['Host', `127.0.0.1:${port}`, 'x-dup', 'a', 'x-dup', 'b'],
+    ],
+    ['an Expect header', '/expect', () => ({ Expect: '100-continue' })],
+  ]) {
+    it(`records a client span for a request with ${title}`, async () => {
+      let receivedTraceparent = 'sentinel';
+
+      const target = await startHTTPServer((req, res) => {
+        receivedTraceparent = req.headers.traceparent;
+        req.resume();
+        req.on('end', () => {
+          res.writeHead(200);
+          res.end('ok');
+        });
+      });
+
+      await new Promise((resolve, reject) => {
+        const req = http.request(
+          {
+            host: '127.0.0.1',
+            port: target.port,
+            method: 'POST',
+            path,
+            headers: getHeaders(target.port),
+          },
+          (res) => {
+            res.resume();
+            res.on('end', resolve);
+          },
+        );
+        req.on('error', reject);
+        req.end('body');
+      });
+
+      const spans = await flushAndCollect(collector);
+      await target.close();
+
+      assert.strictEqual(receivedTraceparent, undefined);
+      const clientSpan = getClientSpan(spans, path);
+      assert.ok(clientSpan, 'Expected a client span');
+      assert.strictEqual(
+        spanAttrs(clientSpan)['http.response.status_code'],
+        '200',
+      );
+    });
+  }
+
   it('omits server.port when the Host port is not decimal', async () => {
     const target = await startHTTPServer((req, res) => {
       res.writeHead(200);
