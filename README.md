@@ -10,7 +10,7 @@ It seeks to enable:
 
 * Instrumentation of inbound and outbound HTTP transactions, following [OTel Semconv](https://opentelemetry.io/docs/specs/semconv/general/trace/).
 * Tracing data egress via OTLP/JSON. (JSON-only to avoid bringing in a gRPC dependency.)
-* Distributed tracing via W3C Traceparent.
+* Distributed tracing via W3C Traceparent, including forwarding baggage (but not modifying it).
 
 Anything else, including the following, should be considered initally out of scope:
 
@@ -153,8 +153,9 @@ and span end timing are the same as for the HTTP client spans above. Requests
 that fail before they are dispatched, such as a refused connection, produce
 no span: the undici channels only fire once the request is underway. The
 injected `traceparent` replaces any caller-supplied value rather than
-appending to it, and a stale `tracestate` is removed when the span has none
-to inherit.
+appending to it, a stale `tracestate` is removed when the span has none to
+inherit, and the inherited `baggage` replaces any caller-supplied value the
+same way.
 
 Attributes set on undici/fetch client spans:
 
@@ -179,11 +180,16 @@ and HTTP/2 requests, and child spans created during request processing
 inherit the trace ID. `traceparent` values using a version other than `00` are
 rejected, and a fresh trace is started instead. The `tracestate` header, when
 present, is attached to the span and forwarded verbatim to outgoing requests.
-It is never parsed or modified.
+It is never parsed or modified. The `baggage` header is likewise attached and
+forwarded verbatim, never parsed or modified; per the W3C Baggage specification
+it propagates independently of `traceparent`, so it is carried forward even
+when the `traceparent` is absent or rejected.
 * **Outgoing requests**: The `traceparent` header is injected into outgoing
-HTTP and undici/fetch requests, together with the stored `tracestate` when
-one is present, enabling distributed tracing across services. Outgoing
-`node:http2` requests receive no injection; see the limitations below.
+HTTP and undici/fetch requests, together with the stored `tracestate` and
+`baggage` when present, enabling distributed tracing across services. Baggage
+is a propagated header, not a span attribute, so it never appears in the
+exported span data. Outgoing `node:http2` requests receive no injection; see
+the limitations below.
 
 ## Benchmarks
 
@@ -205,9 +211,10 @@ The tracing subsystem is independent of the OpenTelemetry JavaScript packages. I
 is not interoperable with `@opentelemetry/api`, and spans created by one are not
 visible to the other. Running both in the same process produces duplicate trace
 and span IDs. The built-in instrumentation also overwrites the `traceparent`
-(and, when present, `tracestate`) header on outgoing HTTP requests, discarding
-whatever a userland propagator may have set. Users should run either this
-package or a userland OpenTelemetry SDK, not both.
+(and, when present, `tracestate`) header on outgoing HTTP requests, and
+replaces the `baggage` header when the span carries one, discarding whatever a
+userland propagator may have set. Users should run either this package or a
+userland OpenTelemetry SDK, not both.
 
 `init()` activates tracing in the thread that calls it. Worker threads
 (`node:worker_threads`) are not traced unless they call `init()` themselves.

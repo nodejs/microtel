@@ -158,6 +158,64 @@ describe('otel undici spans', () => {
     );
   });
 
+  it('overrides a stale baggage with the inherited one', async () => {
+    const incomingTraceId = 'b'.repeat(32);
+    const incomingBaggage = 'vendor=inherited,key=value';
+
+    let seen;
+    // The fetch target records the trace context headers it receives.
+    const fetchTarget = await startHTTPServer((req, res) => {
+      seen = {
+        traceparent: req.headers.traceparent,
+        baggage: req.headers.baggage,
+      };
+      res.writeHead(200);
+      res.end('ok');
+    });
+
+    // A fetch made while handling a traced request inherits the incoming
+    // baggage and must override the caller-supplied stale one.
+    const frontend = await startHTTPServer((req, res) => {
+      fetch(`http://127.0.0.1:${fetchTarget.port}/down`, {
+        headers: { baggage: 'stale=caller-value' },
+      }).then((fr) => {
+        fr.text().then(() => {
+          res.writeHead(200);
+          res.end('ok');
+        });
+      });
+    });
+
+    await rawRequest(frontend.port, '/up', {
+      traceparent: `00-${incomingTraceId}-0123456789abcdef-01`,
+      baggage: incomingBaggage,
+    });
+
+    const spans = await flushAndCollect(collector);
+    await closeAll(fetchTarget, frontend);
+
+    assert.ok(seen?.traceparent, 'Expected a traceparent on the fetch');
+    assert.ok(
+      seen.traceparent.includes(incomingTraceId),
+      'The fetch must carry the incoming trace ID',
+    );
+    assert.strictEqual(
+      seen.baggage,
+      incomingBaggage,
+      'The inherited baggage must win over the stale one',
+    );
+
+    // Baggage is a propagation header, not a span attribute: it must
+    // not be emitted into the OTLP payload.
+    const clientSpan = getClientSpan(spans, '/down');
+    assert.ok(clientSpan, 'Expected a client span for the fetch');
+    const attributeKeys = (clientSpan.attributes ?? []).map((a) => a.key);
+    assert.ok(
+      !attributeKeys.includes('baggage'),
+      'baggage must not be emitted as a span attribute',
+    );
+  });
+
   it('parents fetch spans to the server span in the same trace', async () => {
     const incomingTraceId = 'a'.repeat(32);
 
