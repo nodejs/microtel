@@ -7,6 +7,7 @@ const {
   startHTTPServer,
   flushAndCollect,
   getClientSpan,
+  getServerSpan,
   rawRequest,
   spanAttrs,
   closeAll,
@@ -155,6 +156,44 @@ describe('otel undici spans', () => {
       incomingTracestate,
       'The inherited tracestate must win over the stale one',
     );
+  });
+
+  it('parents fetch spans to the server span in the same trace', async () => {
+    const incomingTraceId = 'a'.repeat(32);
+
+    const fetchTarget = await startHTTPServer();
+    // A fetch made while handling a traced request.
+    const frontend = await startHTTPServer((req, res) => {
+      fetch(`http://127.0.0.1:${fetchTarget.port}/down`).then((fr) => {
+        fr.text().then(() => {
+          res.writeHead(200);
+          res.end('ok');
+        });
+      });
+    });
+
+    await rawRequest(frontend.port, '/up', {
+      traceparent: `00-${incomingTraceId}-0123456789abcdef-01`,
+    });
+
+    const spans = await flushAndCollect(collector);
+    await closeAll(fetchTarget, frontend);
+
+    // The full chain, asserted on the exported spans: the server span
+    // parents the fetch client span, and the fetch span parents the
+    // downstream server span, all in the incoming trace.
+    const serverSpan = getServerSpan(spans, '/up');
+    const fetchSpan = getClientSpan(spans, '/down');
+    const downstreamSpan = getServerSpan(spans, '/down');
+    assert.ok(serverSpan, 'Expected a server span for the inbound request');
+    assert.ok(fetchSpan, 'Expected a client span for the fetch');
+    assert.ok(downstreamSpan, 'Expected a server span downstream of the fetch');
+
+    assert.strictEqual(serverSpan.traceId, incomingTraceId);
+    assert.strictEqual(fetchSpan.traceId, incomingTraceId);
+    assert.strictEqual(fetchSpan.parentSpanId, serverSpan.spanId);
+    assert.strictEqual(downstreamSpan.traceId, incomingTraceId);
+    assert.strictEqual(downstreamSpan.parentSpanId, fetchSpan.spanId);
   });
 
   it('removes a stale tracestate when the span has none', async () => {
