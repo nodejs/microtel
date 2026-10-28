@@ -4,7 +4,7 @@ Node.js experimental OpenTelemetry built-in support.
 
 > This module is under active development and is not yet ready for use.
 
-This project aims to be an independent implementation of _parts_ of OpenTelemetry. It is focused on supporting the [traces])(https://opentelemetry.io/docs/concepts/signals/traces/) signal alongside tracing context propagation.
+This project aims to be an independent implementation of _parts_ of OpenTelemetry. It is focused on supporting the [traces](https://opentelemetry.io/docs/concepts/signals/traces/) signal alongside tracing context propagation.
 It's intended to be included in Node.js core as a dependency, and wired up in there accordingly.
 It seeks to enable:
 
