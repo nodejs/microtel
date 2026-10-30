@@ -141,6 +141,28 @@ test('queued exports share an absolute deadline and bounded byte budget', async 
   await Promise.all([first, queued]);
 });
 
+test('gRPC drops expired queued batches before opening a stream', async (t) => {
+  let now = 1000;
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  const url = await collector(t, (stream) => {
+    calls++;
+    // Advance past both deadlines before completing the active RPC,
+    // without giving the queued batch's real timer a chance to run.
+    if (calls === 1) now += 1000;
+    respond(stream);
+  });
+  const client = exporter(t, url, 500);
+  const active = client.send(empty);
+  const expired = assert.rejects(client.send(empty), /export timeout/);
+  await Promise.all([active, expired]);
+  assert.equal(calls, 1, 'the expired batch must never reach the collector');
+
+  // Discarding expired work must leave the exporter able to send new work.
+  await client.send(empty);
+  assert.equal(calls, 2);
+});
+
 test('gRPC reports connection failure without an unhandled error', async (t) => {
   await assert.rejects(
     exporter(t, 'http://127.0.0.1:1').send(empty),
