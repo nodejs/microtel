@@ -77,6 +77,9 @@ includes time spent queued. Idle HTTP/2 sessions do not keep the process alive.
 
 The exporter reports gRPC errors and OTLP partial-rejection responses through
 `OTelExportWarning`. Failed and partially rejected exports are not retried.
+After `UNAVAILABLE`, new and queued exports pause for one second, doubling on
+consecutive `UNAVAILABLE` responses up to 30 seconds. A successful export resets
+the delay. Queued exports retain their original deadlines while paused.
 Compression, custom metadata/authentication options, and configurable TLS options
 are not implemented.
 
