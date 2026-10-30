@@ -26,12 +26,14 @@
     "node": ">=26.9.0"
   },
   "scripts": {
-    "test": "node --test 'test/test-*.js'",
+    "build": "node scripts/build.js",
+    "test": "npm run build && node --test 'test/test-*.js'",
     "bench": "node --experimental-bench --bench 'benchmark/*.bench.js'",
     "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@opentelemetry/semantic-conventions": "1.43.0",
+    "esbuild": "0.28.2",
     "prettier": "3.9.10"
   }
 }
