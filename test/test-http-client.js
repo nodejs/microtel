@@ -280,4 +280,31 @@ describe('otel HTTP client spans', () => {
     const exceptionEvent = errorSpan.events.find((e) => e.name === 'exception');
     assert.ok(exceptionEvent, 'Should have exception event');
   });
+
+  // Application code can reassign res.req, so the span must not be found
+  // through it. Node itself needs res.req until the body ends, but not for
+  // the 'close' that follows.
+  it('survives res.req being reassigned after the body ends', async () => {
+    const target = await startHTTPServer((req, res) => res.end('ok'));
+
+    await new Promise((resolve, reject) => {
+      http
+        .get(`http://127.0.0.1:${target.port}/reassigned`, (res) => {
+          res.resume();
+          res.on('end', () => {
+            res.req = undefined;
+          });
+          res.on('close', resolve);
+        })
+        .on('error', reject);
+    });
+    const spans = await flushAndCollect(collector);
+
+    await target.close();
+
+    assert.ok(
+      getClientSpan(spans, '/reassigned'),
+      'Expected a client span for /reassigned',
+    );
+  });
 });

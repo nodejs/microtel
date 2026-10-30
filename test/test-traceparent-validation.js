@@ -1,7 +1,9 @@
 'use strict';
 
 const assert = require('node:assert');
+const { inspect } = require('node:util');
 const { after, before, describe, it } = require('node:test');
+const { Span } = require('../lib/span');
 const {
   startTracing,
   startHTTPServer,
@@ -88,5 +90,56 @@ describe('otel traceparent validation', () => {
       !serverSpan.parentSpanId,
       'Should not have a parent from an unknown version',
     );
+  });
+});
+
+describe('otel traceparent parsing', () => {
+  const traceId = '0af7651916cd43dd8448eb211c80319c';
+  const spanId = 'b7ad6b7169203331';
+  const header = (flags) => `00-${traceId}-${spanId}-${flags}`;
+
+  it('parses version 00 headers with any flags', () => {
+    for (const [flags, traceFlags] of [
+      ['00', 0],
+      ['01', 1],
+      ['ff', 255],
+    ])
+      assert.partialDeepStrictEqual(Span.fromTraceparent(header(flags)), {
+        traceId,
+        spanId,
+        traceFlags,
+      });
+  });
+
+  it('rejects every other layout', () => {
+    const invalid = [
+      `01-${traceId}-${spanId}-01`,
+      `ff-${traceId}-${spanId}-01`,
+      `00-${'0'.repeat(32)}-${spanId}-01`,
+      `00-${traceId}-${'0'.repeat(16)}-01`,
+      `00-${traceId.toUpperCase()}-${spanId}-01`,
+      `00-${traceId}-${spanId.toUpperCase()}-01`,
+      header('0A'),
+      header('0\u0661'),
+      `00-${traceId.slice(1)}-${spanId}-01`,
+      `00-${traceId}0-${spanId}-01`,
+      `00-${traceId}-${spanId.slice(1)}-01`,
+      header('1'),
+      header('001'),
+      `00-${traceId}${spanId}-01`,
+      `00--${traceId}-${spanId}-01`,
+      `${header('01')}-01`,
+      `${header('01')}\n`,
+      `${header('01')}\r`,
+      `${header('01')}\r\n`,
+      ` ${header('01')}`,
+      '',
+      undefined,
+      null,
+      1,
+      [header('01')],
+    ];
+    for (const value of invalid)
+      assert.strictEqual(Span.fromTraceparent(value), null, inspect(value));
   });
 });
