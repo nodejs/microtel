@@ -9,7 +9,7 @@ It's intended to be included in Node.js core as a dependency, and wired up in th
 It seeks to enable:
 
 * Instrumentation of inbound and outbound HTTP transactions, following [OTel Semconv](https://opentelemetry.io/docs/specs/semconv/general/trace/).
-* Tracing data egress via OTLP/JSON. (JSON-only to avoid bringing in a gRPC dependency.)
+* Tracing data egress via OTLP/HTTP JSON or OTLP/gRPC, without runtime dependencies.
 * Distributed tracing via W3C Traceparent, including forwarding baggage (but not modifying it).
 
 Anything else, including the following, should be considered initally out of scope:
@@ -43,7 +43,8 @@ started. Invalid options throw.
 
 | Option           | Type   | Default                      | Description |
 | ---------------- | ------ | ---------------------------- | ----------- |
-| `endpoint`       | string | `http://localhost:4318`      | Base URL of an OTLP/HTTP collector. Only `http:` and `https:` URLs are accepted. `/v1/traces` is appended to the endpoint's existing path. An endpoint already ending with `/v1/traces` is used as is. |
+| `protocol`       | string | `json`                 | Export protocol: `json` or `grpc`. |
+| `endpoint`       | string | protocol dependent          | Collector URL. Defaults to `http://localhost:4318` for `json`, or `http://localhost:4317` for `grpc`. Only `http:` and `https:` URLs are accepted. For HTTP/JSON, `/v1/traces` is appended to the existing path unless already present. For gRPC, the path is replaced with `/opentelemetry.proto.collector.trace.v1.TraceService/Export`. |
 | `serviceName`    | string | `unknown_service:node`      | Service name in exported resource attributes. The default follows the OpenTelemetry [semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/trace/) for low-cardinality service names. |
 | `sdkName`        | string | `microtel`                   | `telemetry.sdk.name` resource attribute, and the name of the instrumentation scope on exported spans. |
 | `sdkVersion`    | string | this package's version      | `telemetry.sdk.version` resource attribute, and the scope version. |
@@ -52,6 +53,32 @@ started. Invalid options throw.
 | `maxBufferSize`  | number | `100`                        | Number of spans buffered before an immediate flush is triggered. Must be a positive integer. |
 | `flushInterval`  | number | `10000`                      | Milliseconds between periodic flushes. Must be a positive integer. |
 | `exportTimeout`  | number | `10000`                      | Milliseconds to wait for a collector response before an export is failed. Must be a positive integer. |
+
+To export over gRPC using Node.js's HTTP/2 implementation:
+
+```js
+otel.init({
+  protocol: 'grpc',
+  endpoint: 'http://localhost:4317',
+  serviceName: 'my-service',
+});
+```
+
+Use `https:` for TLS with normal Node.js certificate verification, or `http:`
+for cleartext HTTP/2. There is no HTTP/1.1 fallback or protocol autodetection.
+The gRPC exporter encodes the existing spans directly into an uncompressed
+protobuf request. It supports only the unary OTLP trace export method.
+
+Exports use one active RPC and a bounded queue: at most 100 batches and 16 MiB
+plus one framing prefix across active and queued payloads. Each protobuf request
+is limited to 16 MiB, and each response message to 64 KiB. A batch exceeding
+these limits is dropped with a throttled `OTelExportWarning`. The export deadline
+includes time spent queued. Idle HTTP/2 sessions do not keep the process alive.
+
+The exporter reports gRPC errors and OTLP partial-rejection responses through
+`OTelExportWarning`. Failed and partially rejected exports are not retried.
+Compression, custom metadata/authentication options, and configurable TLS options
+are not implemented.
 
 ### Exported functions
 
@@ -190,6 +217,13 @@ HTTP and undici/fetch requests, together with the stored `tracestate` and
 is a propagated header, not a span attribute, so it never appears in the
 exported span data. Outgoing `node:http2` requests receive no injection; see
 the limitations below.
+
+## Tests
+
+Run `npm test`. Encoding tests use the development-only `protobufjs` dependency
+and download the four required OpenTelemetry Proto v1.9.0 schemas from a pinned
+commit on first use. They cache them under `os.tmpdir()/microtel-otlp/`; subsequent
+runs work offline while that cache exists. The first run needs access to `raw.githubusercontent.com`.
 
 ## Benchmarks
 
