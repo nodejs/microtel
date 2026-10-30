@@ -163,6 +163,70 @@ test('gRPC drops expired queued batches before opening a stream', async (t) => {
   assert.equal(calls, 2);
 });
 
+test('gRPC backs off after UNAVAILABLE, caps the delay, and resets on success', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 });
+  let available = false;
+  const url = await collector(t, (stream) =>
+    respond(stream, empty, available ? '0' : '14'),
+  );
+  const client = exporter(t, url, 1000000);
+  const active = client.send(empty);
+  const request = t.mock.method(client.session, 'request');
+  const queued = client.send(empty);
+  queued.catch(() => {});
+  await assert.rejects(active, /status 14/);
+  let requests = 0;
+
+  // These are new batches, not retries of the rejected batch. Observe real
+  // HTTP/2 stream creation while advancing a fake clock, without sleeps.
+  for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+    const pending = requests === 0 ? queued : client.send(empty);
+    pending.catch(() => {});
+    assert.equal(request.mock.callCount(), requests);
+    t.mock.timers.tick(delay - 1);
+    assert.equal(request.mock.callCount(), requests);
+    t.mock.timers.tick(1);
+    await assert.rejects(pending, /status 14/);
+    assert.equal(request.mock.callCount(), ++requests);
+  }
+
+  available = true;
+  const recovered = client.send(empty);
+  t.mock.timers.tick(30000);
+  await recovered;
+  assert.equal(request.mock.callCount(), ++requests);
+
+  available = false;
+  await assert.rejects(client.send(empty), /status 14/);
+  assert.equal(request.mock.callCount(), ++requests);
+  available = true;
+  const next = client.send(empty);
+  t.mock.timers.tick(999);
+  assert.equal(request.mock.callCount(), requests);
+  t.mock.timers.tick(1);
+  await next;
+  assert.equal(request.mock.callCount(), ++requests);
+});
+
+test('gRPC keeps deadlines and cancellation effective during overload backoff', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 });
+  const url = await collector(t, (stream) => respond(stream, empty, '14'));
+  const client = exporter(t, url, 100);
+  await assert.rejects(client.send(empty), /status 14/);
+  const request = t.mock.method(client.session, 'request');
+
+  const expired = assert.rejects(client.send(empty), /export timeout/);
+  t.mock.timers.tick(100);
+  await expired;
+  assert.equal(request.mock.callCount(), 0);
+
+  const cancelled = assert.rejects(client.send(empty), /closed/);
+  client.close();
+  await cancelled;
+  t.mock.timers.tick(30000);
+  assert.equal(request.mock.callCount(), 0);
+});
+
 test('gRPC reports connection failure without an unhandled error', async (t) => {
   await assert.rejects(
     exporter(t, 'http://127.0.0.1:1').send(empty),
