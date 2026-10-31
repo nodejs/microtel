@@ -25,4 +25,17 @@ describe('otel ID generation buffer refill', () => {
       assert.strictEqual(ids.size, count);
     });
   }
+
+  it('never reuses random bytes when trace and span IDs interleave', () => {
+    // A trace ID that does not fit the rest of a chunk starts a new one,
+    // so every 8-byte piece of every ID must be distinct.
+    const pieces = new Set();
+    let total = 0;
+    for (let i = 0; i < 1000; i++) {
+      const id = i % 3 === 0 ? generateSpanId() : generateTraceId();
+      for (let j = 0; j < id.length; j += 16, total++)
+        pieces.add(id.slice(j, j + 16));
+    }
+    assert.strictEqual(pieces.size, total);
+  });
 });

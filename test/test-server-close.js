@@ -3,20 +3,25 @@
 const assert = require('node:assert');
 const http = require('node:http');
 const net = require('node:net');
-const { describe, it } = require('node:test');
+const { after, before, describe, it } = require('node:test');
 const { flush } = require('../lib/flush');
 const {
   startTracing,
   startHTTPServer,
   getSpans,
   getServerSpan,
-  closeAll,
 } = require('./common/otel');
 
 describe('otel server request close handling', () => {
-  it('ends span with error when client disconnects before response', async () => {
-    const collector = await startTracing();
+  let collector;
 
+  before(async () => {
+    collector = await startTracing();
+  });
+
+  after(() => collector.close());
+
+  async function testDisconnect(reassignReq) {
     // Create a server that delays its response for every path except
     // /flush, which responds normally and is used to trigger an export.
     const server = await startHTTPServer((req, res) => {
@@ -25,6 +30,7 @@ describe('otel server request close handling', () => {
         res.end('ok');
         return;
       }
+      if (reassignReq) res.req = undefined;
       // Don't respond — the client will disconnect first.
       req.on('close', () => {
         // After the client disconnects, make a normal request and flush.
@@ -45,12 +51,20 @@ describe('otel server request close handling', () => {
 
     const spans = getSpans(await collector.next());
 
-    await closeAll(collector, server);
+    await server.close();
 
     const disconnectSpan = getServerSpan(spans, '/disconnect');
 
     assert.ok(disconnectSpan, 'Expected a server span for /disconnect');
     assert.ok(disconnectSpan.status, 'Span should have error status');
     assert.strictEqual(disconnectSpan.status.code, 2); // STATUS_ERROR
-  });
+  }
+
+  it('ends span with error when client disconnects before response', () =>
+    testDisconnect(false));
+
+  // Application code can reassign res.req, so the span must not be found
+  // through it.
+  it('ends span with error after the handler reassigns res.req', () =>
+    testDisconnect(true));
 });

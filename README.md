@@ -193,17 +193,22 @@ the limitations below.
 
 ## Benchmarks
 
-The HTTP benchmark uses the experimental `node:bench` runner, which is also
-what sets the package's Node.js floor (`engines` requires 26.9.0 or newer):
+The benchmarks use the experimental `node:bench` runner, which is also what
+sets the package's Node.js floor (`engines` requires 26.9.0 or newer):
 
 ```bash
 node --experimental-bench --bench 'benchmark/*.bench.js'
 ```
 
-The traced and untraced configurations live in separate files: the runner
-executes each file in its own child process, and tracing activates at most
-once per process. The traced run exports to a local dummy collector, so the
-measurement includes the export round trip.
+The traced and untraced HTTP and fetch configurations live in separate
+files: the runner executes each file in its own child process, and tracing
+activates at most once per process. The traced runs export to a local dummy
+collector in the same process, so the measurement includes the export work
+done while the requests run.
+
+Smaller benchmarks time pieces of that work on their own: building client
+and server spans, generating IDs into a `traceparent` value, and exporting
+batches of spans until the collector has received the last one.
 
 ## Current limitations
 
