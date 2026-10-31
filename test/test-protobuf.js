@@ -97,3 +97,20 @@ test('signed integers match protobufjs for limits and deterministic random value
     );
   }
 });
+
+test('varint sizes match protobufjs across all ten byte lengths', () => {
+  const values = [0n, (1n << 64n) - 1n];
+  for (let bits = 7; bits < 64; bits += 7) {
+    const limit = 1n << BigInt(bits);
+    values.push(limit - 1n, limit, limit + 1n);
+  }
+  for (const value of values) {
+    const expected = protobuf.Writer.create()
+      .uint64(String(value))
+      .finish().length;
+    assert.equal(measureVarint(value), expected);
+    if (value <= BigInt(Number.MAX_SAFE_INTEGER)) {
+      assert.equal(measureVarint(Number(value)), expected);
+    }
+  }
+});
