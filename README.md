@@ -9,7 +9,7 @@ It's intended to be included in Node.js core as a dependency, and wired up in th
 It seeks to enable:
 
 * Instrumentation of inbound and outbound HTTP transactions, following [OTel Semconv](https://opentelemetry.io/docs/specs/semconv/general/trace/).
-* Tracing data egress via OTLP/JSON. (JSON-only to avoid bringing in a gRPC dependency.)
+* Tracing data egress via OTLP/HTTP JSON or OTLP/gRPC, without runtime dependencies.
 * Distributed tracing via W3C Traceparent, including forwarding baggage (but not modifying it).
 
 Anything else, including the following, should be considered initally out of scope:
@@ -43,7 +43,8 @@ started. Invalid options throw.
 
 | Option           | Type   | Default                      | Description |
 | ---------------- | ------ | ---------------------------- | ----------- |
-| `endpoint`       | string | `http://localhost:4318`      | Base URL of an OTLP/HTTP collector. Only `http:` and `https:` URLs are accepted. `/v1/traces` is appended to the endpoint's existing path. An endpoint already ending with `/v1/traces` is used as is. |
+| `protocol`       | string | `json`                 | Export protocol: `json` or `grpc`. |
+| `endpoint`       | string | protocol dependent          | Collector URL. Defaults to `http://localhost:4318` for `json`, or `http://localhost:4317` for `grpc`. Only `http:` and `https:` URLs are accepted. For HTTP/JSON, `/v1/traces` is appended to the existing path unless already present. For gRPC, the path is replaced with `/opentelemetry.proto.collector.trace.v1.TraceService/Export`. |
 | `serviceName`    | string | `unknown_service:node`      | Service name in exported resource attributes. The default follows the OpenTelemetry [semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/trace/) for low-cardinality service names. |
 | `sdkName`        | string | `microtel`                   | `telemetry.sdk.name` resource attribute, and the name of the instrumentation scope on exported spans. |
 | `sdkVersion`    | string | this package's version      | `telemetry.sdk.version` resource attribute, and the scope version. |
@@ -52,6 +53,12 @@ started. Invalid options throw.
 | `maxBufferSize`  | number | `100`                        | Number of spans buffered before an immediate flush is triggered. Must be a positive integer. |
 | `flushInterval`  | number | `10000`                      | Milliseconds between periodic flushes. Must be a positive integer. |
 | `exportTimeout`  | number | `10000`                      | Milliseconds to wait for a collector response before an export is failed. Must be a positive integer. |
+
+To enable gRPC export, set `protocol` to `grpc`:
+
+```js
+otel.init({ protocol: 'grpc' });
+```
 
 ### Exported functions
 

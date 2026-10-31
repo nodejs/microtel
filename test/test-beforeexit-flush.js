@@ -19,7 +19,10 @@ describe('otel beforeExit flush', () => {
     // The child makes a traced request and exits without flushing.
     const { code } = await spawnMicrotel([
       fixture('beforeexit-flush-child.js'),
-      JSON.stringify({ endpoint: `http://127.0.0.1:${collector.port}` }),
+      JSON.stringify({
+        protocol: 'json',
+        endpoint: `http://127.0.0.1:${collector.port}`,
+      }),
     ]);
 
     assert.strictEqual(code, 0);
