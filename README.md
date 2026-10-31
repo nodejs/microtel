@@ -114,7 +114,7 @@ Attributes set on HTTP/2 server spans:
 | `url.path`                  | Request URL path (without query) | Always                        |
 | `url.query`                 | Query string (without `?`)       | When query string is present  |
 | `url.scheme`                | `http` or `https`                | Always                        |
-| `server.address`            | `:authority` pseudo-header value | When present                  |
+| `server.address`            | Requested host, without the port | When `:authority` is present  |
 | `network.protocol.version`  | `2.0`                            | Always                        |
 | `http.response.status_code` | Response status code             | When the response is sent     |
 | `error.type`                | HTTP status code as string       | On 5xx responses              |

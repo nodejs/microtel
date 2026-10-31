@@ -109,7 +109,7 @@ describe('otel HTTP/2 server spans', () => {
       'url.scheme': 'http',
       'network.protocol.version': '2.0',
       'http.response.status_code': '200',
-      'server.address': `127.0.0.1:${target.port}`,
+      'server.address': '127.0.0.1',
     });
   });
 
