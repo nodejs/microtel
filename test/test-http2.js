@@ -230,6 +230,45 @@ describe('otel HTTP/2 server spans', () => {
     assert.notStrictEqual(fresh.traceId, invalid.traceId);
   });
 
+  // Per the W3C Baggage spec, baggage propagates independently of
+  // traceparent, so it is forwarded whether or not one arrives with it.
+  for (const traceparent of [
+    '00-0123456789abcdef0123456789abcdef-0123456789abcdef-01',
+    undefined,
+  ]) {
+    it(`forwards inbound baggage ${traceparent ? 'with' : 'without'} a traceparent`, async () => {
+      // Baggage is forwarded verbatim, so nothing here may be parsed,
+      // trimmed, or reordered.
+      const baggage = 'key1=value1,key2=value2, unpacked = value3';
+      let forwarded = 'sentinel';
+
+      const backend = await startHTTPServer((req, res) => {
+        forwarded = req.headers.baggage;
+        res.end('ok');
+      });
+      const h2Server = await startHTTP2Server((stream) => {
+        fetch(`http://127.0.0.1:${backend.port}/down`)
+          .then((res) => res.text())
+          .then(() => {
+            stream.respond({ ':status': 200 });
+            stream.end('ok');
+          })
+          .catch(() => stream.close());
+      });
+
+      await h2Get(
+        h2Server.port,
+        '/up',
+        traceparent ? { traceparent, baggage } : { baggage },
+      );
+      await flushAndCollect(collector);
+      await backend.close();
+      await h2Server.close();
+
+      assert.strictEqual(forwarded, baggage);
+    });
+  }
+
   // Per OTel semantic conventions, server spans set STATUS_ERROR only for
   // >= 500; 4xx is the caller's mistake, not the server's.
   it('marks 5xx responses as errors but not 4xx', async () => {
