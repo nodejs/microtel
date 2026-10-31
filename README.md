@@ -54,34 +54,11 @@ started. Invalid options throw.
 | `flushInterval`  | number | `10000`                      | Milliseconds between periodic flushes. Must be a positive integer. |
 | `exportTimeout`  | number | `10000`                      | Milliseconds to wait for a collector response before an export is failed. Must be a positive integer. |
 
-To export over gRPC using Node.js's HTTP/2 implementation:
+To enable gRPC export, set `protocol` to `grpc`:
 
 ```js
-otel.init({
-  protocol: 'grpc',
-  endpoint: 'http://localhost:4317',
-  serviceName: 'my-service',
-});
+otel.init({ protocol: 'grpc' });
 ```
-
-Use `https:` for TLS with normal Node.js certificate verification, or `http:`
-for cleartext HTTP/2. There is no HTTP/1.1 fallback or protocol autodetection.
-The gRPC exporter encodes the existing spans directly into an uncompressed
-protobuf request. It supports only the unary OTLP trace export method.
-
-Exports use one active RPC and a bounded queue: at most 100 batches and 16 MiB
-plus one framing prefix across active and queued payloads. Each protobuf request
-is limited to 16 MiB, and each response message to 64 KiB. A batch exceeding
-these limits is dropped with a throttled `OTelExportWarning`. The export deadline
-includes time spent queued. Idle HTTP/2 sessions do not keep the process alive.
-
-The exporter reports gRPC errors and OTLP partial-rejection responses through
-`OTelExportWarning`. Failed and partially rejected exports are not retried.
-After `UNAVAILABLE`, new and queued exports pause for one second, doubling on
-consecutive `UNAVAILABLE` responses up to 30 seconds. A successful export resets
-the delay. Queued exports retain their original deadlines while paused.
-Compression, custom metadata/authentication options, and configurable TLS options
-are not implemented.
 
 ### Exported functions
 
@@ -221,13 +198,6 @@ is a propagated header, not a span attribute, so it never appears in the
 exported span data. Outgoing `node:http2` requests receive no injection; see
 the limitations below.
 
-## Tests
-
-Run `npm test`. Encoding tests use the development-only `protobufjs` dependency
-and download the four required OpenTelemetry Proto v1.9.0 schemas from a pinned
-commit on first use. They cache them under `os.tmpdir()/microtel-otlp/`; subsequent
-runs work offline while that cache exists. The first run needs access to `raw.githubusercontent.com`.
-
 ## Benchmarks
 
 The HTTP benchmark uses the experimental `node:bench` runner, which is also
@@ -241,21 +211,6 @@ The traced and untraced configurations live in separate files: the runner
 executes each file in its own child process, and tracing activates at most
 once per process. The traced run exports to a local dummy collector, so the
 measurement includes the export round trip.
-
-The OTLP benchmarks run as part of `npm run bench`, or on their own:
-
-```bash
-node --experimental-bench --bench 'benchmark/otlp-*.bench.js'
-```
-
-They report **batches per second**: one operation is a batch of 1 or 100 spans,
-with HTTP attributes or exception events. Encoding measures sizing, allocation,
-protobuf writing, and the gRPC message prefix. Export measures encoding plus a
-complete gRPC round trip to an in-process HTTP/2 collector, including response
-and status handling. The dummy collector consumes requests without decoding
-protobuf; it needs no external service. Both benchmarks prebuild span models and
-cache resource/scope metadata, excluding instrumentation, span construction, and
-flush scheduling. Each case uses 20 warm-up invocations and 30 measured samples.
 
 ## Current limitations
 
