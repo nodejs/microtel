@@ -242,6 +242,21 @@ executes each file in its own child process, and tracing activates at most
 once per process. The traced run exports to a local dummy collector, so the
 measurement includes the export round trip.
 
+The OTLP benchmarks run as part of `npm run bench`, or on their own:
+
+```bash
+node --experimental-bench --bench 'benchmark/otlp-*.bench.js'
+```
+
+They report **batches per second**: one operation is a batch of 1 or 100 spans,
+with HTTP attributes or exception events. Encoding measures sizing, allocation,
+protobuf writing, and the gRPC message prefix. Export measures encoding plus a
+complete gRPC round trip to an in-process HTTP/2 collector, including response
+and status handling. The dummy collector consumes requests without decoding
+protobuf; it needs no external service. Both benchmarks prebuild span models and
+cache resource/scope metadata, excluding instrumentation, span construction, and
+flush scheduling. Each case uses 20 warm-up invocations and 30 measured samples.
+
 ## Current limitations
 
 The tracing subsystem is independent of the OpenTelemetry JavaScript packages. It
