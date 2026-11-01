@@ -1,0 +1,50 @@
+name: Benchmark
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: head
+      - uses: actions/setup-node@v7
+        with:
+          node-version: latest
+
+      # On push event, run the `bench` script directly.
+      - if: github.event_name != 'pull_request'
+        working-directory: head
+        run: npm run bench
+
+      # On pull_request event, run the `bench` and compare.
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+      - if: github.event_name == 'pull_request'
+        run: node head/scripts/compare-benchmarks.js base head > comparison.md
+      - if: github.event_name == 'pull_request'
+        env:
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.sha }}
+        run: |
+          BASE_SHA=$(git -C base rev-parse HEAD)
+          commits="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit"
+          {
+            echo "- base: [\`${BASE_SHA::7}\`]($commits/$BASE_SHA) on \`$GITHUB_BASE_REF\`"
+            echo "- PR: [\`${PR_SHA::7}\`]($commits/$PR_SHA), merged onto \`$GITHUB_BASE_REF\` as [\`${MERGE_SHA::7}\`]($commits/$MERGE_SHA)"
+            echo
+            cat comparison.md
+          } >> "$GITHUB_STEP_SUMMARY"
