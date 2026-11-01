@@ -73,7 +73,8 @@ describe('otel undici spans', () => {
 
       const overridden = receivedTraceparent['/override-test'];
       assert.ok(overridden, 'Expected a traceparent on the override request');
-      assert.match(overridden, /^00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]$/);
+      // A root span is sampled and sets the random flag.
+      assert.match(overridden, /^00-[0-9a-f]{32}-[0-9a-f]{16}-03$/);
       assert.ok(
         !overridden.includes(','),
         'traceparent must be overridden, not duplicated',

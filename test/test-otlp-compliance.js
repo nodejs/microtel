@@ -188,6 +188,15 @@ describe('OTLP/JSON spec compliance', () => {
       assert.ok(startSec > 1577836800, 'timestamp too old'); // 2020-01-01
       assert.ok(startSec < 4102444800, 'timestamp too far in future'); // 2100-01-01
 
+      // --- flags: fixed32, W3C trace flags plus the two remote bits ---
+      assert.ok(Number.isInteger(span.flags), 'flags must be an integer');
+      assert.strictEqual(span.flags & ~0x3ff, 0, 'bits 10-31 must be zero');
+      assert.ok(span.flags & 0x100, 'whether the parent is remote is known');
+
+      // --- traceState: omitted, or a W3C tracestate string ---
+      if (span.traceState !== undefined)
+        assert.strictEqual(typeof span.traceState, 'string');
+
       // --- parentSpanId: omitted for root, 16-char hex for child ---
       if (span.parentSpanId !== undefined) {
         assert.ok(typeof span.parentSpanId === 'string');

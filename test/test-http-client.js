@@ -53,7 +53,8 @@ describe('otel HTTP client spans', () => {
     });
 
     assert.ok(receivedTraceparent, 'Expected non-empty traceparent');
-    assert.match(receivedTraceparent, /^00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]$/);
+    // A root span is sampled and sets the random flag.
+    assert.match(receivedTraceparent, /^00-[0-9a-f]{32}-[0-9a-f]{16}-03$/);
 
     // The traceparent must reference the client span's IDs.
     assert.ok(

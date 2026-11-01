@@ -269,6 +269,43 @@ describe('otel HTTP/2 server spans', () => {
     });
   }
 
+  it('forwards the trace flags of an inbound traceparent unchanged', async () => {
+    const traceId = '0123456789abcdef0123456789abcdef';
+    const forwarded = {};
+    const backend = await startHTTPServer((req, res) => {
+      forwarded[req.url] = req.headers.traceparent;
+      res.end('ok');
+    });
+    const h2Server = await startHTTP2Server((stream, headers) => {
+      fetch(`http://127.0.0.1:${backend.port}${headers[':path']}`)
+        .then((res) => res.text())
+        .then(() => {
+          stream.respond({ ':status': 200 });
+          stream.end('ok');
+        })
+        .catch(() => stream.close());
+    });
+
+    // Trace Context Level 2's random flag, with and without the sampled
+    // flag. The sampled trace also makes sure there is an export to wait
+    // for.
+    for (const flags of ['02', '03']) {
+      await h2Get(h2Server.port, `/flags-${flags}`, {
+        traceparent: `00-${traceId}-0123456789abcdef-${flags}`,
+      });
+    }
+    await flushAndCollect(collector);
+    await backend.close();
+    await h2Server.close();
+
+    for (const flags of ['02', '03']) {
+      assert.match(
+        forwarded[`/flags-${flags}`],
+        RegExp(`^00-${traceId}-[0-9a-f]{16}-${flags}$`),
+      );
+    }
+  });
+
   // Per OTel semantic conventions, server spans set STATUS_ERROR only for
   // >= 500; 4xx is the caller's mistake, not the server's.
   it('marks 5xx responses as errors but not 4xx', async () => {
