@@ -68,13 +68,12 @@ describe('otel traceparent validation', () => {
     assert.ok(!serverSpan.parentSpanId);
   });
 
-  it('rejects traceparent versions other than 00', async () => {
+  it('continues the incoming trace for version 01 with extensions', async () => {
     const server = await startHTTPServer();
 
-    // Version 01 is not understood; a fresh trace must be started.
     await rawRequest(server.port, '/test', {
       traceparent:
-        '01-abcdef0123456789abcdef0123456789-' + '0123456789abcdef-01',
+        '01-abcdef0123456789abcdef0123456789-' + '0123456789abcdef-01-extra',
     });
 
     const spans = await flushAndCollect(collector);
@@ -82,14 +81,8 @@ describe('otel traceparent validation', () => {
 
     const serverSpan = getServerSpan(spans, '/test');
     assert.ok(serverSpan);
-    assert.notStrictEqual(
-      serverSpan.traceId,
-      'abcdef0123456789abcdef0123456789',
-    );
-    assert.ok(
-      !serverSpan.parentSpanId,
-      'Should not have a parent from an unknown version',
-    );
+    assert.strictEqual(serverSpan.traceId, 'abcdef0123456789abcdef0123456789');
+    assert.strictEqual(serverSpan.parentSpanId, '0123456789abcdef');
   });
 });
 
@@ -111,10 +104,40 @@ describe('otel traceparent parsing', () => {
       });
   });
 
-  it('rejects every other layout', () => {
+  it('parses higher versions using the known fields and ignores extensions', () => {
+    // Regression: valid higher versions must preserve the incoming parent.
+    for (const version of ['01', '09', '0a', 'fe']) {
+      for (const extension of ['', '-', '-extra', '-extra-more']) {
+        const value = `${version}-${traceId}-${spanId}-01${extension}`;
+        assert.partialDeepStrictEqual(Span.fromTraceparent(value), {
+          traceId,
+          spanId,
+          traceFlags: 1,
+        });
+      }
+    }
+  });
+
+  it('emits version 00 for a child of a higher-version parent', () => {
+    const parent = Span.fromTraceparent(`01-${traceId}-${spanId}-01-extra`);
+    assert.ok(parent);
+    const span = new Span('child', 1, { parent });
+    assert.strictEqual(span.toTraceparent(), `00-${traceId}-${span.spanId}-01`);
+  });
+
+  it('rejects invalid versions and layouts', () => {
     const invalid = [
-      `01-${traceId}-${spanId}-01`,
       `ff-${traceId}-${spanId}-01`,
+      `ff-${traceId}-${spanId}-01-extra`,
+      `0A-${traceId}-${spanId}-01`,
+      `gg-${traceId}-${spanId}-01`,
+      `1-${traceId}-${spanId}-01`,
+      `01-${traceId}-${spanId}-0`,
+      `01-${traceId}-${spanId}-010`,
+      `01-${traceId}-${spanId}-01extra`,
+      `01-${'0'.repeat(32)}-${spanId}-01-extra`,
+      `01-${traceId}-${'0'.repeat(16)}-01-extra`,
+      `01-${traceId.toUpperCase()}-${spanId}-01-extra`,
       `00-${'0'.repeat(32)}-${spanId}-01`,
       `00-${traceId}-${'0'.repeat(16)}-01`,
       `00-${traceId.toUpperCase()}-${spanId}-01`,

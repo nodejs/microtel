@@ -226,10 +226,10 @@ describe('otel context propagation', () => {
       });
     });
 
-    // Version 01 is rejected per the W3C spec, so the tracestate that
-    // arrived with it must not be forwarded to child requests.
+    // Version ff is invalid, so its tracestate is discarded.
+    // https://www.w3.org/TR/trace-context/#version
     await rawRequest(frontend.port, '/frontend', {
-      traceparent: `01-${rejectedTraceId}-0123456789abcdef-01`,
+      traceparent: `ff-${rejectedTraceId}-0123456789abcdef-01`,
       tracestate: 'vendor=value',
     });
 
