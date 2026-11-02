@@ -5,7 +5,7 @@ const { after, afterEach, before, describe, it } = require('node:test');
 
 const { Span, SPAN_KIND_INTERNAL } = require('../lib/span');
 const { addSpan, flush, resetCaches } = require('../lib/flush');
-const { startTracing, getSpans, delay } = require('./common/otel');
+const { startTracing, getSpans } = require('./common/otel');
 
 describe('flush.js coverage', () => {
   let collector;
@@ -24,10 +24,7 @@ describe('flush.js coverage', () => {
   it('flush is a no-op when buffer is empty', async () => {
     const before = collector.requests.length;
 
-    flush();
-
-    // Wait for any potential export request.
-    await delay(100);
+    await flush();
 
     assert.strictEqual(collector.requests.length, before);
   });
@@ -142,10 +139,7 @@ describe('flush.js coverage', () => {
 
     resetCaches();
 
-    flush();
-
-    // Wait for any potential export request.
-    await delay(100);
+    await flush();
 
     assert.strictEqual(collector.requests.length, before);
   });

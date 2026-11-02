@@ -24,16 +24,12 @@ server.listen(0, '127.0.0.1', () => {
       // export path: it must still be traced.
       http.get(`http://127.0.0.1:${process.argv[3]}/health`, (healthRes) => {
         healthRes.resume();
-        healthRes.on('end', () => {
-          setTimeout(() => {
-            flush();
-            setTimeout(() => {
-              flush();
-              setTimeout(() => {
-                server.close(() => http.globalAgent.destroy());
-              }, 200);
-            }, 200);
-          }, 50);
+        healthRes.on('end', async () => {
+          // Any self-traced span of the first export ends when it does,
+          // so the awaited second flush would carry it.
+          await flush();
+          await flush();
+          server.close(() => http.globalAgent.destroy());
         });
       });
     });

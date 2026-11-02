@@ -10,7 +10,6 @@ const {
   getSpans,
   getClientSpan,
   httpGet,
-  delay,
   fixture,
   spawnMicrotel,
   closeAll,
@@ -27,14 +26,11 @@ describe('otel self-trace prevention', () => {
     // Flushing sends an HTTP request to the collector, which fires
     // http.client.request.created. The self-trace check must prevent a
     // client span for that export request.
-    flush();
-    await collector.next();
+    await flush();
 
-    // Give any inadvertent export-request spans time to buffer, then
-    // flush again so they would be exported and observable.
-    await delay(100);
-    flush();
-    await delay(100);
+    // Any inadvertent span for the export request ended when the export
+    // did, so it is buffered now. A second flush would carry it.
+    await flush();
 
     await closeAll(collector, server);
 
