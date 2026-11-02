@@ -289,6 +289,50 @@ OpenTelemetry SDKs export them, so a collector sees the threshold and flags
 too. The span flags also record whether each span's parent arrived from
 another process.
 
+## Working with the OpenTelemetry SDK
+
+microtel can run next to the official OpenTelemetry SDK for Node.js. When the
+SDK has registered a context manager that supports `attach()`, as
+`@opentelemetry/context-async-hooks` 2.11.0 and later do, the two share one
+context. Spans the SDK starts while microtel traces a request become children of
+microtel's server span, and the client spans microtel creates become children
+of whatever SDK span is current. The same holds when the SDK's HTTP
+instrumentation traces inbound requests and microtel traces the outbound ones.
+This needs no configuration and no dependency on `@opentelemetry/api`. Without
+such a context manager, microtel keeps its own context, and the two trace
+separately.
+
+While microtel traces a request, `trace.getActiveSpan()` returns its server
+span. Attributes, events, status, exceptions, and name changes made through it
+land on that span until the span ends, following the SDK's rules for status
+and exceptions. As in the SDK, a span whose trace isn't sampled records none
+of them, and its `isRecording()` returns false. A span keeps at most 128 events,
+the SDK's default limit.
+Calls to `end()` are ignored, since microtel ends its own spans, and links are
+dropped. Requests made while the SDK suppresses tracing, such as its own
+exports, are not traced.
+
+Each side propagates trace context the way it normally does. microtel forwards
+the `baggage` of requests it received itself, so baggage that the SDK extracted
+or set is not added to the requests microtel traces.
+
+Only one of them should trace each kind of request, or the request gets two
+spans. Turn off the SDK's `http` and `undici` instrumentations, for example
+through `getNodeAutoInstrumentations()`:
+
+```js
+getNodeAutoInstrumentations({
+  '@opentelemetry/instrumentation-http': { enabled: false },
+  '@opentelemetry/instrumentation-undici': { enabled: false },
+});
+```
+
+Or turn off microtel's with the `exclude` option. The two can also split the
+work: the SDK's HTTP instrumentation can trace only inbound requests, with
+`disableOutgoingRequestInstrumentation: true`, while microtel excludes
+`node:http/server`. Each exports its own spans, so give both the same service
+name.
+
 ## Benchmarks
 
 The benchmarks use the experimental `node:bench` runner, which is also what
@@ -310,14 +354,16 @@ batches of spans, with each flush awaited through the end of its export.
 
 ## Current limitations
 
-The tracing subsystem is independent of the OpenTelemetry JavaScript packages. It
-is not interoperable with `@opentelemetry/api`, and spans created by one are not
-visible to the other. Running both in the same process produces duplicate trace
-and span IDs. The built-in instrumentation also overwrites the `traceparent`
-(and, when present, `tracestate`) header on outgoing HTTP requests, and
-replaces the `baggage` header when the span carries one, discarding whatever a
-userland propagator may have set. Users should run either this package or a
-userland OpenTelemetry SDK, not both.
+microtel does not implement the OpenTelemetry API itself. Spans created through
+`@opentelemetry/api` are recorded only when the OpenTelemetry SDK is running
+too, and then by the SDK. See
+[Working with the OpenTelemetry SDK](#working-with-the-opentelemetry-sdk) for
+how the two share context. The built-in instrumentation overwrites the
+`traceparent` (and, when present, `tracestate`) header on outgoing HTTP
+requests, and replaces the `baggage` header when the span carries one,
+discarding whatever a userland propagator may have set. The SDK's framework
+instrumentations, such as its Express instrumentation, do not yet add routes to
+microtel's server spans.
 
 `init()` activates tracing in the thread that calls it. Worker threads
 (`node:worker_threads`) are not traced unless they call `init()` themselves.
