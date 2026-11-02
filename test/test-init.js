@@ -83,6 +83,19 @@ describe('otel init validation', () => {
     );
   });
 
+  it('throws on an invalid sampleRatio', () => {
+    for (const sampleRatio of [-0.1, 1.5, NaN]) {
+      assert.throws(
+        () => microtel.init({ endpoint: 'http://127.0.0.1:1', sampleRatio }),
+        { name: 'RangeError', code: 'ERR_OUT_OF_RANGE' },
+      );
+    }
+    assert.throws(
+      () => microtel.init({ endpoint: 'http://127.0.0.1:1', sampleRatio: '1' }),
+      { code: 'ERR_INVALID_ARG_TYPE' },
+    );
+  });
+
   it('throws on an invalid filter type', () => {
     assert.throws(
       () => {

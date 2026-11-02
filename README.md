@@ -52,6 +52,7 @@ started. Invalid options throw.
 | `maxBufferSize`  | number | `100`                        | Number of spans buffered before an immediate flush is triggered. Must be a positive integer. |
 | `flushInterval`  | number | `10000`                      | Milliseconds between periodic flushes. Must be a positive integer. |
 | `exportTimeout`  | number | `10000`                      | Milliseconds to wait for a collector response before an export is failed. Must be a positive integer. |
+| `sampleRatio`    | number | `1`                          | Probability, from 0 to 1, that a trace this process starts is sampled. Requests that arrive with a `traceparent` keep its decision instead. See [Sampling](#sampling). |
 
 ### Exported functions
 
@@ -179,8 +180,8 @@ Tracing automatically propagates [W3C Trace Context](https://www.w3.org/TR/trace
 and HTTP/2 requests, and child spans created during request processing
 inherit the trace ID. `traceparent` values using a version other than `00` are
 rejected, and a fresh trace is started instead. The `tracestate` header, when
-present, is attached to the span and forwarded verbatim to outgoing requests.
-It is never parsed or modified. The `baggage` header is likewise attached and
+present, is attached to the span, forwarded verbatim to outgoing requests,
+and exported with the span. It is never parsed or modified. The `baggage` header is likewise attached and
 forwarded verbatim, never parsed or modified; per the W3C Baggage specification
 it propagates independently of `traceparent`, so it is carried forward even
 when the `traceparent` is absent or rejected.
@@ -189,7 +190,38 @@ HTTP and undici/fetch requests, together with the stored `tracestate` and
 `baggage` when present, enabling distributed tracing across services. Baggage
 is a propagated header, not a span attribute, so it never appears in the
 exported span data. Outgoing `node:http2` requests receive no injection; see
-the limitations below.
+the limitations below. A trace this process starts also carries sampling
+information in these headers, as described under [Sampling](#sampling).
+
+## Sampling
+
+A trace is sampled or dropped as a whole, by the process that starts it. A
+span with a parent follows its parent's decision, including a parent from an
+incoming `traceparent`, whose sampled flag is kept as is. A span without one,
+a root span, decides with `sampleRatio`. Only sampled spans are exported, but
+trace context still propagates for dropped traces, so services downstream can
+drop them too.
+
+The decision follows the OpenTelemetry
+[ProbabilitySampler](https://opentelemetry.io/docs/specs/otel/trace/sdk/#probabilitysampler).
+The rightmost 56 bits of the trace ID are compared with a rejection threshold
+derived from `sampleRatio`, with four significant hex digits of precision.
+Services that use the same rule agree with each other: a trace kept at one
+ratio is kept at any higher ratio. A `sampleRatio` of `0` starts no sampled
+traces, so only requests that arrive sampled are traced.
+
+When `sampleRatio` is below `1`, a sampled root span starts its trace with the
+`tracestate` entry `ot=th:<threshold>`. It tells samplers and backends
+downstream the probability the trace was kept with. Traces this process starts
+also carry the W3C Trace Context Level 2 random flag, since their trace IDs
+come from a cryptographically secure random number generator. Their
+`traceparent` flags are `03` when sampled and `02` when not. The flags of an
+incoming `traceparent` are forwarded unchanged.
+
+Exported spans carry the same `tracestate` and trace flags, the way the
+OpenTelemetry SDKs export them, so a collector sees the threshold and flags
+too. The span flags also record whether each span's parent arrived from
+another process.
 
 ## Benchmarks
 

@@ -8,6 +8,7 @@ const {
   validateString,
   validateObject,
   validateInteger,
+  validateNumber,
 } = require('internal/validators');
 const {
   codes: { ERR_INVALID_ARG_TYPE, ERR_INVALID_ARG_VALUE, ERR_OUT_OF_RANGE },
@@ -18,6 +19,7 @@ const impl = {
   validateString,
   validateObject,
   validateInteger,
+  validateNumber,
   invalidArgTypeError: (name, expected, actual) =>
     new ERR_INVALID_ARG_TYPE(name, expected, actual),
   invalidArgValueError: (name, value, reason) =>
