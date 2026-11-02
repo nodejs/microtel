@@ -39,6 +39,11 @@ Tracing is activated at most once per process. Calling `init()` a second time
 is a no-op, even with different options. There is no way to stop tracing once
 started. Invalid options throw.
 
+microtel catches errors in its own handlers, so a bug in microtel can't crash
+the app it traces. Each error is reported as an `OTelInstrumentationWarning`
+process warning, at most once every 30 seconds with a running count. The
+request it happened on carries on untraced or partly traced.
+
 ### Options
 
 | Option           | Type   | Default                      | Description |
