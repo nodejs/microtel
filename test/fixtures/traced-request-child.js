@@ -7,7 +7,15 @@
 const { init, flush } = require(process.env.MICROTEL_PATH);
 const http = require('node:http');
 
-init(JSON.parse(process.argv[2]));
+const options = JSON.parse(process.argv[2]);
+init(options);
+
+// The headers were copied at init(), so mutations afterwards must not
+// reach the export.
+if (options.headers) {
+  options.headers['x-api-key'] = 'mutated';
+  options.headers['x-extra'] = 'added';
+}
 
 const server = http.createServer((req, res) => {
   res.writeHead(200);
