@@ -44,3 +44,28 @@ jobs:
           node-version: latest
       - run: npm ci
       - run: npm run format:check
+
+  # The collector runs from a step, since a service container starts before
+  # the checkout and could not read its config. Its output directory is
+  # mounted at the same path, so one variable names the file for both.
+  collector:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: latest
+      - run: |
+          mkdir "$RUNNER_TEMP/collector"
+          echo "COLLECTOR_OUTPUT=$RUNNER_TEMP/collector/spans.jsonl" >> "$GITHUB_ENV"
+      - run: >-
+          docker run -d --name collector --user "$(id -u):$(id -g)"
+          -p 127.0.0.1:4318:4318 -e COLLECTOR_OUTPUT
+          -v "$PWD/test/collector/config.yaml:/etc/otelcol/config.yaml:ro"
+          -v "$RUNNER_TEMP/collector:$RUNNER_TEMP/collector"
+          otel/opentelemetry-collector:0.164.0@sha256:28b6d41ac51bff6b41ba5e8fe503569ffb9d6a1ea90f7a78419e86f34e44f750
+          --config /etc/otelcol/config.yaml
+      - run: node --test --test-force-exit test/collector/
+      - if: failure()
+        run: docker logs collector || true
