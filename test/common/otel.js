@@ -85,9 +85,11 @@ async function startTracing(options) {
   return collector;
 }
 
-// Flushes the span buffer and resolves with the spans of the next export.
+// Flushes the span buffer and resolves with the spans of the next
+// export. The payload has reached the collector by the time flush()
+// resolves.
 async function flushAndCollect(collector) {
-  flush();
+  await flush();
   return getSpans(await collector.next());
 }
 

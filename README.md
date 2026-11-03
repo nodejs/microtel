@@ -59,7 +59,18 @@ started. Invalid options throw.
 
 * `init(options)` activates tracing. Returns nothing. Throws on invalid options.
 * `isActive()` returns whether tracing was activated.
-* `flush()` exports any buffered spans immediately. Also runs on `beforeExit`.
+* `flush()` exports any buffered spans immediately and returns a promise. The promise resolves once those spans and any export already in flight are done, whether or not they reached the collector. It never rejects, since failed exports are already reported as `OTelExportWarning` warnings. Also runs on `beforeExit`.
+
+Explicit exits skip the `beforeExit` flush, and so does a serverless platform
+that freezes the process after each invocation. Await `flush()` first in either
+case:
+
+```js
+process.on('SIGTERM', async () => {
+  await otel.flush();
+  process.exit(0);
+});
+```
 
 ## Instrumented operations
 
@@ -241,7 +252,7 @@ done while the requests run.
 
 Smaller benchmarks time pieces of that work on their own: building client
 and server spans, generating IDs into a `traceparent` value, and exporting
-batches of spans until the collector has received the last one.
+batches of spans, with each flush awaited through the end of its export.
 
 ## Current limitations
 
@@ -267,7 +278,7 @@ Inbound HTTP/2 context is fully parsed; only the client side is affected.
 Buffered spans are exported periodically, when the buffer fills, and when the
 event loop is about to drain. Spans that are still buffered when `process.exit()`
 is called explicitly are lost, because explicit exits do not run the exit-time
-flush.
+flush. Awaiting `flush()` before the exit sends them.
 
 ## License
 

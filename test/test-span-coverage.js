@@ -5,7 +5,7 @@ const { after, before, describe, it } = require('node:test');
 
 const { Span, SPAN_KIND_INTERNAL, STATUS_UNSET } = require('../lib/span');
 const { flush } = require('../lib/flush');
-const { startTracing, getSpans, delay } = require('./common/otel');
+const { startTracing, getSpans } = require('./common/otel');
 
 describe('Span internals coverage', () => {
   let collector;
@@ -34,8 +34,7 @@ describe('Span internals coverage', () => {
 
     // Nothing has been traced in this file yet, so any payload proves the
     // unsampled span was exported.
-    flush();
-    await delay(100);
+    await flush();
     assert.strictEqual(collector.payloads.length, 0);
   });
 

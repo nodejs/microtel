@@ -8,7 +8,6 @@ const {
   startTracing,
   startHTTPServer,
   httpGet,
-  delay,
   fixture,
   getSpans,
   spawnMicrotel,
@@ -25,11 +24,9 @@ describe('otel filter', () => {
     await httpGet(server.port, '/');
 
     // If any spans were created despite the filter, they would be
-    // exported here.
-    flush();
-
-    // Wait for any potential export request.
-    await delay(100);
+    // exported here. The request count is settled once the promise
+    // resolves.
+    await flush();
 
     assert.strictEqual(collector.requests.length, 0);
 
