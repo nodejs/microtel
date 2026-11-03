@@ -127,10 +127,29 @@ Attributes set on server spans:
 | `url.path`                  | Request URL path (without query) | Always                        |
 | `url.query`                 | Query string (without `?`)       | When query string is present  |
 | `url.scheme`                | `http` or `https`                | Always                        |
-| `server.address`            | Requested host, without the port | When `Host` header is present |
+| `server.address`            | Requested host, without the port | When a host source is present |
+| `server.port`               | Requested port, or its default   | When the port is known        |
+| `client.address`            | Client address, behind proxies when known, else the immediate peer | When the client or peer is known |
+| `network.peer.address`      | Immediate peer address           | When the socket exposes it    |
+| `network.peer.port`          | Immediate peer port              | When the peer address is set  |
 | `network.protocol.version`  | HTTP version (e.g. `1.1`)        | Always                        |
+| `user_agent.original`        | Client `User-Agent` header       | When the header is present    |
 | `http.response.status_code` | Response status code             | When response finishes        |
 | `error.type`                | HTTP status code as string       | On 5xx responses              |
+
+The address attributes follow the proxy headers the way OpenTelemetry's
+own HTTP instrumentation does, although a client can spoof them.
+`server.address` and `server.port` come from the first of the `Forwarded`
+header's `host` parameter, the first `X-Forwarded-Host` entry, and the
+`Host` header, each parsed for both the host and the port, including
+bracketed IPv6. When the chosen value omits the port, the default comes
+from the `Forwarded` `proto` parameter, the first `X-Forwarded-Proto`
+entry, or, for the `Host` header, the request scheme, in any letter case.
+A port that is not a decimal number from 0 to 65535 is omitted. `client.address` comes from the first `Forwarded` `for`
+parameter or the first `X-Forwarded-For` entry, and otherwise from the
+immediate peer. `network.peer.address` and `network.peer.port` come
+from the socket, so behind a proxy they name the proxy. A malformed
+`Forwarded` header is treated as absent.
 
 ### HTTP/2 server
 
@@ -153,10 +172,19 @@ Attributes set on HTTP/2 server spans:
 | `url.path`                  | Request URL path (without query) | Always                        |
 | `url.query`                 | Query string (without `?`)       | When query string is present  |
 | `url.scheme`                | `http` or `https`                | Always                        |
-| `server.address`            | Requested host, without the port | When `:authority` is present  |
+| `server.address`            | Requested host, without the port | When a host source is present |
+| `server.port`               | Requested port, or its default   | When the port is known        |
+| `client.address`            | Client address, behind proxies when known, else the immediate peer | When the client or peer is known |
+| `network.peer.address`      | Immediate peer address           | When the socket exposes it    |
+| `network.peer.port`          | Immediate peer port              | When the peer address is set  |
 | `network.protocol.version`  | `2.0`                            | Always                        |
+| `user_agent.original`        | Client `User-Agent` header       | When the header is present    |
 | `http.response.status_code` | Response status code             | When the response is sent     |
 | `error.type`                | HTTP status code as string       | On 5xx responses              |
+
+The address attributes follow the same rules as for HTTP/1 server
+spans. The `:authority` pseudo-header stands in for the `Host` header,
+and the peer attributes come from the session's socket.
 
 ### HTTP client
 
@@ -181,8 +209,8 @@ Attributes set on client spans:
 | `error.type`                | Status code or error name | On 4xx/5xx or errors      |
 
 The `server.port` value is the decimal port from the Host header, or the scheme
-default (`80` for `http:`, `443` for `https:`) when the header omits it; a
-port that is not a decimal number is omitted.
+default (`80` for `http:`, `443` for `https:`) when the header omits it. A
+port that is not a decimal number from 0 to 65535 is omitted.
 
 ### Undici/Fetch client
 
