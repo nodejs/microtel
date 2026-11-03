@@ -268,6 +268,11 @@ event loop is about to drain. Spans that are still buffered when `process.exit()
 is called explicitly are lost, because explicit exits do not run the exit-time
 flush.
 
+A span keeps at most 128 distinct attributes, the OpenTelemetry SDK's default
+`attributeCountLimit`. Writes to a key the span already has always land. A new
+key past the limit is dropped and counted, and the count is exported with the
+span as the `droppedAttributesCount` OTLP field.
+
 ## License
 
 [MIT](./LICENSE)
