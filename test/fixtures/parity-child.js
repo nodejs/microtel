@@ -7,6 +7,7 @@
 const {
   validateString,
   validateObject,
+  validateAbortSignal,
   validateInteger,
   validateNumber,
 } = require('internal/validators');
@@ -18,6 +19,7 @@ const { runBattery } = require(process.env.BATTERY_MODULE);
 const impl = {
   validateString,
   validateObject,
+  validateAbortSignal,
   validateInteger,
   validateNumber,
   invalidArgTypeError: (name, expected, actual) =>
