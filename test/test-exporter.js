@@ -8,6 +8,7 @@ const {
   fixture,
   httpGet,
   startHTTPServer,
+  startOTelCollector,
   spawnMicrotel,
 } = require('./common/otel');
 
@@ -121,6 +122,32 @@ describe('otel exporter behavior', () => {
     } finally {
       collector.close();
     }
+  });
+
+  it('sends the configured headers to the collector', async () => {
+    // The child mutates its headers object after init(), so the collector
+    // seeing the init-time values proves both the delivery and the copy.
+    const collector = await startOTelCollector();
+
+    const { code, stdout } = await spawnMicrotel([
+      fixture('traced-request-child.js'),
+      JSON.stringify({
+        endpoint: `http://127.0.0.1:${collector.port}`,
+        headers: { 'x-api-key': 'secret', 'x-tenant': 'bengl' },
+      }),
+    ]);
+
+    assert.strictEqual(code, 0);
+    assert.match(stdout, /done/);
+
+    await collector.next();
+    const { headers } = collector.requests[0];
+    assert.strictEqual(headers['x-api-key'], 'secret');
+    assert.strictEqual(headers['x-tenant'], 'bengl');
+    assert.strictEqual(headers['x-extra'], undefined);
+    assert.strictEqual(headers['content-type'], 'application/json');
+
+    await collector.close();
   });
 
   it('flush timer does not keep process alive', async () => {

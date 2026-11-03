@@ -96,6 +96,42 @@ describe('otel init validation', () => {
     );
   });
 
+  it('throws on invalid headers', () => {
+    const initHeaders = (headers) =>
+      microtel.init({ endpoint: 'http://127.0.0.1:1', headers });
+
+    assert.throws(() => initHeaders('x-api-key=secret'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    assert.throws(() => initHeaders(['x-api-key']), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    assert.throws(() => initHeaders({ 'bad name': 'secret' }), {
+      code: 'ERR_INVALID_HTTP_TOKEN',
+    });
+    assert.throws(() => initHeaders({ 'x-api-key': 'a\nb' }), {
+      code: 'ERR_INVALID_CHAR',
+    });
+    assert.throws(() => initHeaders({ 'x-api-key': 42 }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+
+    // Names microtel sets or depends on itself are refused at any letter
+    // case.
+    for (const name of [
+      'content-type',
+      'Content-Length',
+      'HOST',
+      'Transfer-Encoding',
+      'Trailer',
+      'connection',
+    ]) {
+      assert.throws(() => initHeaders({ [name]: 'x' }), {
+        code: 'ERR_INVALID_ARG_VALUE',
+      });
+    }
+  });
+
   it('throws on an invalid filter type', () => {
     assert.throws(
       () => {

@@ -53,6 +53,7 @@ started. Invalid options throw.
 | `flushInterval`  | number | `10000`                      | Milliseconds between periodic flushes. Must be a positive integer. |
 | `exportTimeout`  | number | `10000`                      | Milliseconds to wait for a collector response before an export is failed. Must be a positive integer. |
 | `sampleRatio`    | number | `1`                          | Probability, from 0 to 1, that a trace this process starts is sampled. Requests that arrive with a `traceparent` keep its decision instead. See [Sampling](#sampling). |
+| `headers`        | object | none                         | Header names mapped to string values, sent with every export request, such as an API key a hosted backend requires. `content-type`, `content-length`, `host`, `transfer-encoding`, `trailer`, and `connection` are refused at any letter case, since microtel manages them itself. The object is copied at init. |
 
 ### Exported functions
 
