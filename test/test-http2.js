@@ -13,6 +13,7 @@ const {
   spanAttrs,
   closeAll,
 } = require('./common/otel');
+const { getSpanStorage } = require('../lib/core');
 
 // Starts a plain HTTP/2 server for traced requests. The handler receives
 // (stream, headers). Exposes port and close().
@@ -434,6 +435,19 @@ describe('otel HTTP/2 server spans', () => {
     // work must not throw over the missing session.
     const onCreated = ({ stream }) => stream.destroy();
     dc.subscribe('http2.server.stream.created', onCreated);
+    // Subscribed after init(), so this runs after microtel's start
+    // handler and sees whether a span was left current. The second
+    // request arrives unsampled, through a traceparent with its sampled
+    // flag off.
+    let currentAfterStart;
+    let currentAfterUnsampledStart;
+    const onStart = ({ headers }) => {
+      if (headers?.[':path'] === '/destroyed')
+        currentAfterStart = getSpanStorage().getStore();
+      if (headers?.[':path'] === '/destroyed-unsampled')
+        currentAfterUnsampledStart = getSpanStorage().getStore();
+    };
+    dc.subscribe('http2.server.stream.start', onStart);
     const warnings = [];
     const onWarning = (w) => warnings.push(w.name);
     process.on('warning', onWarning);
@@ -442,31 +456,51 @@ describe('otel HTTP/2 server spans', () => {
       // The handler stays quiet: the stream is destroyed before it runs.
       const target = await startHTTP2Server(() => {});
       try {
-        await new Promise((resolve) => {
-          const session = http2.connect(`http://127.0.0.1:${target.port}`);
-          session.on('error', () => {});
-          const stream = session.request({ ':path': '/destroyed' });
-          stream.on('error', () => {});
-          stream.on('close', () => {
-            session.close();
-            resolve();
+        const destroyedGet = (path, headers = {}) =>
+          new Promise((resolve) => {
+            const session = http2.connect(`http://127.0.0.1:${target.port}`);
+            session.on('error', () => {});
+            const stream = session.request({ ':path': path, ...headers });
+            stream.on('error', () => {});
+            stream.on('close', () => {
+              session.close();
+              resolve();
+            });
+            setTimeout(() => {
+              session.close();
+              resolve();
+            }, 50);
           });
-          setTimeout(() => {
-            session.close();
-            resolve();
-          }, 50);
+
+        await destroyedGet('/destroyed');
+        await destroyedGet('/destroyed-unsampled', {
+          traceparent: `00-${'a'.repeat(32)}-${'1'.repeat(16)}-00`,
         });
       } finally {
         await target.close();
       }
     } finally {
       dc.unsubscribe('http2.server.stream.created', onCreated);
+      dc.unsubscribe('http2.server.stream.start', onStart);
       process.removeListener('warning', onWarning);
     }
 
     assert.ok(
       !warnings.includes('OTelInstrumentationWarning'),
       'The span work must not fail over the missing session',
+    );
+    // The ended span must not be left current: no handler runs for the
+    // destroyed stream, and later subscribers share this context.
+    assert.strictEqual(
+      currentAfterStart?.endTime,
+      undefined,
+      'The ended span must not be left current',
+    );
+    // An unsampled destroyed stream leaves no span current either. Its
+    // span never ended, so the endTime check above could not tell.
+    assert.ok(
+      currentAfterUnsampledStart == null,
+      'The unsampled destroyed span must not be left current',
     );
 
     // The instrumentation still traces the next stream.

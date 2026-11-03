@@ -276,6 +276,12 @@ Services that use the same rule agree with each other: a trace kept at one
 ratio is kept at any higher ratio. A `sampleRatio` of `0` starts no sampled
 traces, so only requests that arrive sampled are traced.
 
+A span whose trace is not sampled is never exported, so it records none of
+what only the export would read: no attributes, no timestamps, no response
+listeners. Trace and span IDs, trace flags, tracestate, and baggage are kept,
+the span is still the parent of the spans made while handling the request,
+and its context is still injected into outgoing requests.
+
 When `sampleRatio` is below `1`, a sampled root span starts its trace with the
 `tracestate` entry `ot=th:<threshold>`. It tells samplers and backends
 downstream the probability the trace was kept with. Traces this process starts
@@ -302,7 +308,9 @@ The traced and untraced HTTP and fetch configurations live in separate
 files: the runner executes each file in its own child process, and tracing
 activates at most once per process. The traced runs export to a local dummy
 collector in the same process, so the measurement includes the export work
-done while the requests run.
+done while the requests run. An unsampled traced configuration, with
+`sampleRatio: 0`, is measured too: its requests propagate context but never
+export, so the comparison tracks what that costs.
 
 Smaller benchmarks time pieces of that work on their own: building client
 and server spans, generating IDs into a `traceparent` value, and exporting
