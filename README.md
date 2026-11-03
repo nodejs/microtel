@@ -47,6 +47,7 @@ started. Invalid options throw.
 | `serviceName`    | string | `unknown_service:node`      | Service name in exported resource attributes. The default follows the OpenTelemetry [semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/trace/) for low-cardinality service names. |
 | `sdkName`        | string | `microtel`                   | `telemetry.sdk.name` resource attribute, and the name of the instrumentation scope on exported spans. |
 | `sdkVersion`    | string | this package's version      | `telemetry.sdk.version` resource attribute, and the scope version. |
+| `resourceAttributes` | object | none                  | Additional attributes in the exported resource, replacing microtel's values for the same keys. Values must be strings, booleans, or finite numbers. `service.name`, `telemetry.sdk.name`, and `telemetry.sdk.version` are refused: use `serviceName`, `sdkName`, and `sdkVersion` instead. Other `telemetry.sdk.*` keys are refused because microtel sets them. The object is copied at init, so changing it afterwards has no effect. |
 | `filter`         | string | all modules                  | Comma-separated list of modules to instrument. Supported values: `node:http`, `node:http/client`, `node:http/server`, `node:http2`, `node:http2/server`, and `node:undici`. `node:http` covers `node:http/client` and `node:http/server`; `node:http2` covers `node:http2/server`. `node:fetch` is an alias for `node:undici`: both cover all undici requests, including `fetch()`, and either one enables them. |
 | `exclude`        | string | none                         | Comma-separated list of modules to exclude from instrumentation. Same values as `filter`; takes precedence over it. |
 | `maxBufferSize`  | number | `100`                        | Number of spans buffered before an immediate flush is triggered. Must be a positive integer. |
@@ -54,6 +55,13 @@ started. Invalid options throw.
 | `exportTimeout`  | number | `10000`                      | Milliseconds to wait for a collector response before an export is failed. Must be a positive integer. |
 | `sampleRatio`    | number | `1`                          | Probability, from 0 to 1, that a trace this process starts is sampled. Requests that arrive with a `traceparent` keep its decision instead. See [Sampling](#sampling). |
 | `headers`        | object | none                         | Header names mapped to string values, sent with every export request, such as an API key a hosted backend requires. `content-type`, `content-length`, `host`, `transfer-encoding`, `trailer`, and `connection` are refused at any letter case, since microtel manages them itself. The object is copied at init. |
+
+Every exported span shares one resource. It carries the service identity, a
+per-process random `service.instance.id` UUID, `host.name` from
+`os.hostname()`, the SDK identity, and the process attributes
+(`process.runtime.*` and `process.pid`). `resourceAttributes` adds to it, and
+can replace any of microtel's values except `service.name` and the
+`telemetry.sdk.*` keys.
 
 ### Exported functions
 
