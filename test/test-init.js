@@ -2,6 +2,7 @@
 
 const assert = require('node:assert');
 const { spawn } = require('node:child_process');
+const os = require('node:os');
 const { describe, it } = require('node:test');
 const {
   MICROTEL_PATH,
@@ -139,6 +140,57 @@ describe('otel init validation', () => {
       },
       { code: 'ERR_INVALID_ARG_TYPE' },
     );
+  });
+
+  it('throws on an invalid resourceAttributes', () => {
+    const initWith = (resourceAttributes) => () =>
+      microtel.init({ endpoint: 'http://127.0.0.1:1', resourceAttributes });
+
+    assert.throws(initWith('service.version=1.2.3'), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    for (const [attributes, code, text] of [
+      [
+        { 'service.version': null },
+        'ERR_INVALID_ARG_TYPE',
+        "options.resourceAttributes['service.version']",
+      ],
+      [{ ratio: NaN }, 'ERR_INVALID_ARG_VALUE', 'must be a finite number'],
+      [{ ratio: Infinity }, 'ERR_INVALID_ARG_VALUE', 'must be a finite number'],
+      [
+        { ratio: -Infinity },
+        'ERR_INVALID_ARG_VALUE',
+        'must be a finite number',
+      ],
+      [{ '': 'x' }, 'ERR_INVALID_ARG_VALUE', 'must not have an empty key'],
+      // Keys that other options set have one place to be set.
+      [
+        { 'service.name': 'x' },
+        'ERR_INVALID_ARG_VALUE',
+        'is set through options.serviceName',
+      ],
+      [
+        { 'telemetry.sdk.name': 'x' },
+        'ERR_INVALID_ARG_VALUE',
+        'is set through options.sdkName',
+      ],
+      [
+        { 'telemetry.sdk.version': 'x' },
+        'ERR_INVALID_ARG_VALUE',
+        'is set through options.sdkVersion',
+      ],
+      [
+        { 'telemetry.sdk.language': 'x' },
+        'ERR_INVALID_ARG_VALUE',
+        'is set by microtel',
+      ],
+    ]) {
+      assert.throws(initWith(attributes), (err) => {
+        assert.strictEqual(err.code, code);
+        assert.ok(err.message.includes(text), err.message);
+        return true;
+      });
+    }
   });
 
   it('throws on an unsupported endpoint protocol', () => {
@@ -460,6 +512,96 @@ describe('otel init activation', () => {
 
     const spans = getSpans(payload);
     assert.ok(spans.length > 0, 'Expected at least one span');
+  });
+
+  it('exports the default service.instance.id and host.name, stable across exports', async () => {
+    const collector = await startOTelCollector();
+
+    const { code, stdout } = await spawnMicrotel([
+      fixture('resource-attrs-child.js'),
+      JSON.stringify({ endpoint: `http://127.0.0.1:${collector.port}` }),
+    ]);
+
+    assert.strictEqual(code, 0);
+    assert.match(stdout, /done/);
+
+    const first = spanAttrs((await collector.next()).resourceSpans[0].resource);
+    const second = spanAttrs(
+      (await collector.next()).resourceSpans[0].resource,
+    );
+    await collector.close();
+
+    const uuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    assert.match(first['service.instance.id'], uuid);
+    assert.strictEqual(
+      second['service.instance.id'],
+      first['service.instance.id'],
+    );
+    assert.strictEqual(first['host.name'], os.hostname());
+    assert.strictEqual(second['host.name'], os.hostname());
+  });
+
+  it('exports user resource attributes, replacing microtel defaults', async () => {
+    const collector = await startOTelCollector();
+
+    const { code, stdout } = await spawnMicrotel([
+      fixture('resource-attrs-child.js'),
+      JSON.stringify({
+        endpoint: `http://127.0.0.1:${collector.port}`,
+        resourceAttributes: {
+          'service.version': '1.2.3',
+          'deployment.environment.name': 'production',
+          'feature.flag': true,
+          'feature.other': false,
+          replicas: 3,
+          zero: 0,
+          ratio: 1.5,
+          big: 1e21,
+          unsafe: 2 ** 53,
+          'host.name': 'my-host',
+          'process.pid': 'not-a-pid',
+        },
+      }),
+    ]);
+
+    assert.strictEqual(code, 0);
+    assert.match(stdout, /done/);
+
+    const payload = await collector.next();
+    await collector.close();
+
+    const resource = payload.resourceSpans[0].resource;
+    // The fixture changes service.version after init(), and the export
+    // keeps what init() saw.
+    assert.partialDeepStrictEqual(spanAttrs(resource), {
+      'service.version': '1.2.3',
+      'deployment.environment.name': 'production',
+      'feature.flag': true,
+      replicas: '3',
+      ratio: 1.5,
+      'host.name': 'my-host',
+      'process.pid': 'not-a-pid',
+    });
+
+    // Values are encoded the way span attributes are. Integers past the
+    // safe range export as doubles, since an int64 string could not hold
+    // them exactly.
+    const find = (key) => resource.attributes.find((a) => a.key === key);
+    for (const [key, value] of [
+      ['replicas', { intValue: '3' }],
+      ['zero', { intValue: '0' }],
+      ['ratio', { doubleValue: 1.5 }],
+      ['big', { doubleValue: 1e21 }],
+      ['unsafe', { doubleValue: 2 ** 53 }],
+      ['feature.flag', { boolValue: true }],
+      ['feature.other', { boolValue: false }],
+    ])
+      assert.deepStrictEqual(find(key).value, value, key);
+
+    // User values replace the defaults, so no key appears twice.
+    const keys = resource.attributes.map((a) => a.key);
+    assert.strictEqual(new Set(keys).size, keys.length);
   });
 
   it('appends /v1/traces to the endpoint path', async () => {

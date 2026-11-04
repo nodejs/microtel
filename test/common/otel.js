@@ -179,7 +179,10 @@ function spanAttrs(span) {
   const attrs = {};
   for (const a of span.attributes ?? []) {
     attrs[a.key] =
-      a.value.stringValue || a.value.intValue || a.value.doubleValue;
+      a.value.stringValue ??
+      a.value.intValue ??
+      a.value.doubleValue ??
+      a.value.boolValue;
   }
   return attrs;
 }
