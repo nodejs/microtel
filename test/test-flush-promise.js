@@ -2,10 +2,12 @@
 
 const assert = require('node:assert');
 const http = require('node:http');
+const { getEventListeners } = require('node:events');
 const { after, before, describe, it } = require('node:test');
 const { flush } = require('../lib/flush');
 const {
   fixture,
+  getClientSpan,
   getServerSpan,
   getSpans,
   httpGet,
@@ -16,9 +18,11 @@ const {
 
 // flush() returns a promise that resolves once every span buffered when
 // it was called has been exported or dropped, and every export already in
-// flight has finished. It resolves, never rejects. Tracing activates once
-// per process, so the in-process tests share one collector and the other
-// configurations run in child processes through fixtures.
+// flight has finished. Export failures resolve it, since they are already
+// reported as warnings. Only an abort the caller asked for through
+// options.signal rejects it. Tracing activates once per process, so the
+// in-process tests share one collector and the other configurations run
+// in child processes through fixtures.
 
 describe('flush() promise', () => {
   let collector;
@@ -200,5 +204,210 @@ describe('flush() promise', () => {
     } finally {
       collector.close();
     }
+  });
+
+  it('exports as before with no signal and with empty options', async () => {
+    const server = await startHTTPServer();
+    await httpGet(server.port, '/flush-no-signal');
+    await server.close();
+
+    await flush();
+    await flush({});
+
+    const allSpans = collector.payloads.flatMap(getSpans);
+    assert.ok(getServerSpan(allSpans, '/flush-no-signal'));
+  });
+
+  it('throws ERR_INVALID_ARG_TYPE on invalid options and signal', () => {
+    assert.throws(() => flush(null), {
+      name: 'TypeError',
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    assert.throws(() => flush('options'), {
+      name: 'TypeError',
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    assert.throws(() => flush({ signal: null }), {
+      name: 'TypeError',
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    assert.throws(() => flush({ signal: 'signal' }), {
+      name: 'TypeError',
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    assert.throws(() => flush({ signal: {} }), {
+      name: 'TypeError',
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+  });
+
+  it('rejects with an AbortError and keeps the spans when the signal is already aborted', async () => {
+    const server = await startHTTPServer();
+    await httpGet(server.port, '/flush-already-aborted');
+    await server.close();
+
+    const controller = new AbortController();
+    controller.abort();
+    const before = collector.requests.length;
+
+    await assert.rejects(flush({ signal: controller.signal }), {
+      name: 'AbortError',
+      code: 'ABORT_ERR',
+      message: 'The operation was aborted',
+      cause: controller.signal.reason,
+    });
+
+    // No export was started, so the spans are still buffered.
+    assert.strictEqual(collector.requests.length, before);
+
+    await flush();
+    assert.ok(collector.requests.length > before);
+    const allSpans = collector.payloads.flatMap(getSpans);
+    assert.ok(getServerSpan(allSpans, '/flush-already-aborted'));
+  });
+
+  it('rejects right away when aborted mid-export, and the export still finishes', async () => {
+    // The collector holds the export's response until the second release,
+    // which the child sends only after the rejection, so the abort finds
+    // the export in flight and the rejection cannot wait for it.
+    let exportArrived = false;
+    let exportBody = '';
+    let pendingExportRes;
+    let pendingReleaseRes;
+    const collector = http.createServer((req, res) => {
+      if (req.url === '/release-1' || req.url === '/release-2') {
+        req.resume();
+        req.on('end', () => {
+          if (req.url === '/release-2' && pendingExportRes !== undefined) {
+            pendingExportRes.writeHead(200);
+            pendingExportRes.end();
+            pendingExportRes = undefined;
+          }
+          if (exportArrived || req.url === '/release-2') {
+            res.writeHead(200);
+            res.end();
+          } else {
+            pendingReleaseRes = res;
+          }
+        });
+        return;
+      }
+      req.on('data', (chunk) => {
+        exportBody += chunk;
+      });
+      req.on('end', () => {
+        exportArrived = true;
+        if (pendingReleaseRes !== undefined) {
+          pendingReleaseRes.writeHead(200);
+          pendingReleaseRes.end();
+          pendingReleaseRes = undefined;
+        }
+        pendingExportRes = res;
+      });
+    });
+    await new Promise((resolve) => collector.listen(0, '127.0.0.1', resolve));
+
+    try {
+      const { code, stdout } = await spawnMicrotel(
+        [
+          fixture('flush-abort-child.js'),
+          JSON.stringify({
+            endpoint: `http://127.0.0.1:${collector.address().port}`,
+          }),
+        ],
+        {},
+        { timeout: 5_000 },
+      );
+
+      assert.strictEqual(code, 0);
+      assert.strictEqual(
+        stdout.trim(),
+        'rejected AbortError ABORT_ERR\nlisteners 0\n' +
+          'second flush pending\nsecond flush settled',
+      );
+      assert.ok(
+        getClientSpan(getSpans(JSON.parse(exportBody)), '127.0.0.1:1/'),
+      );
+    } finally {
+      collector.close();
+    }
+  });
+
+  it('rejects even when an earlier abort listener stops propagation', async () => {
+    // Core's own abort listeners run regardless, and so does this one, or
+    // a caller's listener could hold the flush open.
+    const controller = new AbortController();
+    controller.signal.addEventListener('abort', (event) =>
+      event.stopImmediatePropagation(),
+    );
+    const flushed = flush({ signal: controller.signal });
+    controller.abort();
+    await assert.rejects(flushed, { name: 'AbortError', code: 'ABORT_ERR' });
+  });
+
+  it('rejects with the timeout reason as cause', async () => {
+    // The collector accepts the connection but never answers, so only the
+    // signal can settle the flush first.
+    const collector = http.createServer(() => {});
+    await new Promise((resolve) => collector.listen(0, '127.0.0.1', resolve));
+
+    try {
+      const { code, stdout } = await spawnMicrotel(
+        [
+          '-e',
+          `
+          const http = require('node:http');
+          const { init, flush } = require(process.env.MICROTEL_PATH);
+          init({
+            endpoint: 'http://127.0.0.1:${collector.address().port}',
+            exportTimeout: 250,
+          });
+          http.get('http://127.0.0.1:1/', () => {})
+            .on('error', async () => {
+              try {
+                await flush({ signal: AbortSignal.timeout(50) });
+                console.log('flush resolved');
+              } catch (err) {
+                console.log(JSON.stringify({
+                  name: err.name,
+                  code: err.code,
+                  message: err.message,
+                  cause: err.cause.name,
+                }));
+              }
+            });
+        `,
+        ],
+        {},
+        { timeout: 5_000 },
+      );
+
+      assert.strictEqual(code, 0);
+      assert.deepStrictEqual(JSON.parse(stdout), {
+        name: 'AbortError',
+        code: 'ABORT_ERR',
+        message: 'The operation was aborted',
+        cause: 'TimeoutError',
+      });
+    } finally {
+      collector.close();
+    }
+  });
+
+  it('drops the abort listener once flush() settles', async () => {
+    const server = await startHTTPServer();
+    await httpGet(server.port, '/flush-listener');
+    await server.close();
+
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const wait = flush({ signal });
+    assert.strictEqual(getEventListeners(signal, 'abort').length, 1);
+    await wait;
+    assert.strictEqual(getEventListeners(signal, 'abort').length, 0);
+
+    // A long-lived signal reused across flushes collects no listeners.
+    for (let i = 0; i < 3; i++) await flush({ signal });
+    assert.strictEqual(getEventListeners(signal, 'abort').length, 0);
   });
 });

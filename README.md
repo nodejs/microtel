@@ -72,18 +72,31 @@ can replace any of microtel's values except `service.name` and the
 
 * `init(options)` activates tracing. Returns nothing. Throws on invalid options.
 * `isActive()` returns whether tracing was activated.
-* `flush()` exports any buffered spans immediately and returns a promise. The promise resolves once those spans and any export already in flight are done, whether or not they reached the collector. It never rejects, since failed exports are already reported as `OTelExportWarning` warnings. Also runs on `beforeExit`.
+* `flush([options])` exports any buffered spans immediately and returns a promise. The promise resolves once those spans and any export already in flight are done, whether or not they reached the collector. Export failures resolve it rather than reject it, since they are already reported as `OTelExportWarning` warnings. Also runs on `beforeExit`.
+
+`flush({ signal })` takes an `AbortSignal` that bounds the wait, such as
+`AbortSignal.timeout(ms)`. When it aborts, the promise rejects with an
+`AbortError` shaped like the one Node.js core APIs reject with: its code is
+`ABORT_ERR`, and its `cause` is the signal's reason. Aborting stops the waiting,
+not the export, which keeps running, bounded by `exportTimeout`. With a
+signal that has already aborted, the promise rejects right away and no export
+starts, so the spans stay buffered for a later flush.
 
 Explicit exits skip the `beforeExit` flush, and so does a serverless platform
 that freezes the process after each invocation. Await `flush()` first in either
-case:
+case, bounded by a signal so a stuck collector cannot hold the exit:
 
 ```js
 process.on('SIGTERM', async () => {
-  await otel.flush();
-  process.exit(0);
+  try {
+    await otel.flush({ signal: AbortSignal.timeout(5000) });
+  } finally {
+    process.exit(0);
+  }
 });
 ```
+
+A flush that times out rejects, and the `finally` exits anyway.
 
 ## Instrumented operations
 
