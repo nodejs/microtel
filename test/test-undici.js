@@ -4,6 +4,7 @@ const assert = require('node:assert');
 const { after, before, describe, it } = require('node:test');
 const {
   startTracing,
+  startOTelCollector,
   startHTTPServer,
   flushAndCollect,
   getClientSpan,
@@ -11,6 +12,9 @@ const {
   rawRequest,
   spanAttrs,
   closeAll,
+  fixture,
+  getSpans,
+  spawnMicrotel,
 } = require('./common/otel');
 
 describe('otel undici spans', () => {
@@ -215,6 +219,128 @@ describe('otel undici spans', () => {
       !attributeKeys.includes('baggage'),
       'baggage must not be emitted as a span attribute',
     );
+  });
+
+  it('forwards the full trace context on a fetch', async () => {
+    const incomingTraceId = 'c'.repeat(32);
+    const incomingTracestate = 'vendor=state,other=1';
+    const incomingBaggage = 'key=value,other=2';
+
+    let seen;
+    // The fetch target records the trace context headers it receives.
+    const fetchTarget = await startHTTPServer((req, res) => {
+      seen = {
+        traceparent: req.headers.traceparent,
+        tracestate: req.headers.tracestate,
+        baggage: req.headers.baggage,
+      };
+      res.writeHead(200);
+      res.end('ok');
+    });
+
+    // A fetch with no trace headers of its own, so every injected header
+    // takes the appended path rather than overriding a caller-supplied
+    // value.
+    const frontend = await startHTTPServer((req, res) => {
+      fetch(`http://127.0.0.1:${fetchTarget.port}/down`).then((fr) => {
+        fr.text().then(() => {
+          res.writeHead(200);
+          res.end('ok');
+        });
+      });
+    });
+
+    await rawRequest(frontend.port, '/up', {
+      traceparent: `00-${incomingTraceId}-0123456789abcdef-01`,
+      tracestate: incomingTracestate,
+      baggage: incomingBaggage,
+    });
+
+    await flushAndCollect(collector);
+    await closeAll(fetchTarget, frontend);
+
+    assert.ok(seen?.traceparent, 'Expected a traceparent on the fetch');
+    assert.ok(
+      seen.traceparent.includes(incomingTraceId),
+      'The fetch must carry the incoming trace ID',
+    );
+    assert.strictEqual(
+      seen.tracestate,
+      incomingTracestate,
+      'The inherited tracestate must be forwarded verbatim',
+    );
+    assert.strictEqual(
+      seen.baggage,
+      incomingBaggage,
+      'The inherited baggage must be forwarded verbatim',
+    );
+  });
+
+  it('validates tracestate and baggage through addHeader', async () => {
+    // traceparent is the only header microtel appends without addHeader(),
+    // since only its value is always microtel's own.
+    const { code, stdout, stderr } = await spawnMicrotel([
+      fixture('undici-headers-spy-child.js'),
+      // The fixture's own http.get stands in for a caller, so microtel must
+      // not replace its trace headers.
+      JSON.stringify({
+        endpoint: 'http://127.0.0.1:1',
+        exclude: 'node:http/client',
+      }),
+    ]);
+
+    assert.strictEqual(code, 0, stderr);
+    const { added, received } = JSON.parse(stdout);
+    assert.deepStrictEqual(added, ['tracestate', 'baggage']);
+    assert.partialDeepStrictEqual(received, {
+      tracestate: 'rojo=00f067aa0ba902b7',
+      baggage: 'user=alice',
+    });
+    assert.match(
+      received.traceparent,
+      /^00-0af7651916cd43dd8448eb211c80319c-[0-9a-f]{16}-01$/,
+    );
+  });
+
+  it('falls back to addHeader when the headers are not a flat array', async () => {
+    const collector = await startOTelCollector();
+
+    // The collector is closed even when an assertion fails, or its open
+    // server would keep the test process alive.
+    try {
+      // A child process makes the first read of request.headers return an
+      // object or an odd-length array, so the appended headers must go
+      // through addHeader().
+      for (const shape of ['object', 'odd']) {
+        const { code, stdout, stderr } = await spawnMicrotel([
+          fixture('undici-headers-fallback-child.js'),
+          JSON.stringify({
+            endpoint: `http://127.0.0.1:${collector.port}`,
+            filter: 'node:undici',
+          }),
+          shape,
+        ]);
+
+        // The assertions on the child's exit come first: a child that dies
+        // before its export never delivers a payload, and awaiting the
+        // collector up front would hang the suite on it.
+        assert.strictEqual(code, 0, shape);
+        assert.strictEqual(stderr, '', shape);
+        const [traceparent] = stdout.trim().split('\n');
+        assert.match(
+          traceparent,
+          /^00-[0-9a-f]{32}-[0-9a-f]{16}-0[23]$/,
+          `addHeader must land a valid traceparent on the wire (${shape})`,
+        );
+
+        // The child has exited, so the export its flush started has
+        // completed.
+        const spans = getSpans(await collector.next());
+        assert.ok(getClientSpan(spans, '/down'), shape);
+      }
+    } finally {
+      await collector.close();
+    }
   });
 
   it('parents fetch spans to the server span in the same trace', async () => {
