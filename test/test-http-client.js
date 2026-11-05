@@ -185,38 +185,41 @@ describe('otel HTTP client spans', () => {
     });
   }
 
-  it('omits server.port when the Host port is not decimal', async () => {
+  it('omits server.port when the Host port is not a valid port', async () => {
     const target = await startHTTPServer((req, res) => {
       res.writeHead(200);
       res.end('ok');
     });
 
-    await new Promise((resolve, reject) => {
-      const req = http.get(
-        {
-          host: '127.0.0.1',
-          port: target.port,
-          path: '/odd-host',
-          headers: { Host: 'example.test:not-a-port' },
-        },
-        (res) => {
-          res.resume();
-          res.on('end', resolve);
-        },
-      );
-      req.on('error', reject);
-    });
+    // A port that is not decimal or is outside the TCP range must be
+    // omitted, not encoded as NaN, Infinity, or a rounded number.
+    const ports = ['not-a-port', '65536', '9'.repeat(400)];
+    for (const [i, port] of ports.entries()) {
+      await new Promise((resolve, reject) => {
+        const req = http.get(
+          {
+            host: '127.0.0.1',
+            port: target.port,
+            path: `/odd-host-${i}`,
+            headers: { Host: `example.test:${port}` },
+          },
+          (res) => {
+            res.resume();
+            res.on('end', resolve);
+          },
+        );
+        req.on('error', reject);
+      });
+    }
 
     const spans = await flushAndCollect(collector);
     await target.close();
 
-    const clientSpan = getClientSpan(spans, '/odd-host');
-    assert.ok(clientSpan, 'Expected a client span');
-    assert.strictEqual(
-      spanAttrs(clientSpan)['server.port'],
-      undefined,
-      'a non-decimal port must be omitted, not encoded',
-    );
+    for (const [i, port] of ports.entries()) {
+      const clientSpan = getClientSpan(spans, `/odd-host-${i}`);
+      assert.ok(clientSpan, `Expected a client span for ${port}`);
+      assert.strictEqual(spanAttrs(clientSpan)['server.port'], undefined, port);
+    }
   });
 
   it('parses IPv6 authorities and default ports from the Host header', async () => {

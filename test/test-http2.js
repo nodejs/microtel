@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert');
+const dc = require('node:diagnostics_channel');
 const http2 = require('node:http2');
 const { after, before, describe, it } = require('node:test');
 const {
@@ -110,6 +111,98 @@ describe('otel HTTP/2 server spans', () => {
       'network.protocol.version': '2.0',
       'http.response.status_code': '200',
       'server.address': '127.0.0.1',
+    });
+  });
+
+  it('sets the peer, client, and user agent attributes without proxy headers', async () => {
+    const target = await startHTTP2Server();
+
+    await h2Get(target.port, '/direct', { 'user-agent': 'microtel-test/1' });
+
+    const spans = await flushAndCollect(collector);
+
+    await target.close();
+
+    const serverSpan = getServerSpan(spans, '/direct');
+    assert.ok(serverSpan, 'Expected a server span');
+
+    // With no proxy headers the client is the immediate peer, and
+    // :authority carries the port. A portless :authority falls back to
+    // the scheme default, like the Host header on HTTP/1.1.
+    assert.partialDeepStrictEqual(spanAttrs(serverSpan), {
+      'client.address': '127.0.0.1',
+      'network.peer.address': '127.0.0.1',
+      'server.address': '127.0.0.1',
+      'server.port': String(target.port),
+      'user_agent.original': 'microtel-test/1',
+    });
+
+    const peerPort = serverSpan.attributes.find(
+      (a) => a.key === 'network.peer.port',
+    );
+    assert.match(peerPort.value.intValue, /^\d+$/);
+  });
+
+  it('derives the server port from :authority', async () => {
+    const target = await startHTTP2Server();
+
+    await h2Get(target.port, '/authority-port', {
+      ':authority': 'example.com:8080',
+    });
+    await h2Get(target.port, '/authority-default', {
+      ':authority': 'example.com',
+    });
+
+    const spans = await flushAndCollect(collector);
+
+    await target.close();
+
+    const port = spanAttrs(getServerSpan(spans, '/authority-port'));
+    assert.ok(port, 'Expected a server span for /authority-port');
+    assert.partialDeepStrictEqual(port, {
+      'server.address': 'example.com',
+      'server.port': '8080',
+    });
+
+    // The portless authority yields the scheme default.
+    const def = spanAttrs(getServerSpan(spans, '/authority-default'));
+    assert.ok(def, 'Expected a server span for /authority-default');
+    assert.partialDeepStrictEqual(def, {
+      'server.address': 'example.com',
+      'server.port': '80',
+    });
+  });
+
+  it('reads the proxy headers', async () => {
+    const target = await startHTTP2Server();
+
+    await h2Get(target.port, '/forwarded', {
+      forwarded: 'for="[2001:db8::1]:4711";host="example.com:8080";proto=http',
+    });
+    await h2Get(target.port, '/x-forwarded', {
+      'x-forwarded-for': '192.0.2.60, 198.51.100.17',
+      'x-forwarded-host': 'proxy.example.com',
+      'x-forwarded-proto': 'https',
+    });
+
+    const spans = await flushAndCollect(collector);
+
+    await target.close();
+
+    const forwarded = spanAttrs(getServerSpan(spans, '/forwarded'));
+    assert.ok(forwarded, 'Expected a server span for /forwarded');
+    assert.partialDeepStrictEqual(forwarded, {
+      'client.address': '2001:db8::1',
+      'server.address': 'example.com',
+      'server.port': '8080',
+    });
+
+    const xForwarded = spanAttrs(getServerSpan(spans, '/x-forwarded'));
+    assert.ok(xForwarded, 'Expected a server span for /x-forwarded');
+    assert.partialDeepStrictEqual(xForwarded, {
+      'client.address': '192.0.2.60',
+      'server.address': 'proxy.example.com',
+      'server.port': '443',
     });
   });
 
@@ -332,6 +425,66 @@ describe('otel HTTP/2 server spans', () => {
     assert.ok(notFoundSpan, 'Expected a server span');
     assert.strictEqual(notFoundSpan.status, undefined);
     assert.strictEqual(spanAttrs(notFoundSpan)['error.type'], undefined);
+  });
+
+  it('traces a stream whose session another subscriber destroyed', async () => {
+    // Node publishes http2.server.stream.created before stream.start, and
+    // a subscriber that destroys the stream there clears its session and
+    // runs its close before microtel's start subscriber runs. The span
+    // work must not throw over the missing session.
+    const onCreated = ({ stream }) => stream.destroy();
+    dc.subscribe('http2.server.stream.created', onCreated);
+    const warnings = [];
+    const onWarning = (w) => warnings.push(w.name);
+    process.on('warning', onWarning);
+
+    try {
+      // The handler stays quiet: the stream is destroyed before it runs.
+      const target = await startHTTP2Server(() => {});
+      try {
+        await new Promise((resolve) => {
+          const session = http2.connect(`http://127.0.0.1:${target.port}`);
+          session.on('error', () => {});
+          const stream = session.request({ ':path': '/destroyed' });
+          stream.on('error', () => {});
+          stream.on('close', () => {
+            session.close();
+            resolve();
+          });
+          setTimeout(() => {
+            session.close();
+            resolve();
+          }, 50);
+        });
+      } finally {
+        await target.close();
+      }
+    } finally {
+      dc.unsubscribe('http2.server.stream.created', onCreated);
+      process.removeListener('warning', onWarning);
+    }
+
+    assert.ok(
+      !warnings.includes('OTelInstrumentationWarning'),
+      'The span work must not fail over the missing session',
+    );
+
+    // The instrumentation still traces the next stream.
+    const next = await startHTTP2Server();
+    try {
+      await h2Get(next.port, '/after-destroyed');
+      const spans = await flushAndCollect(collector);
+      assert.ok(getServerSpan(spans, '/after-destroyed'));
+
+      // The destroyed stream's span ended when it was created, since its
+      // close ran before its start, with the status the close handler
+      // would have set.
+      const destroyed = getServerSpan(spans, '/destroyed');
+      assert.ok(destroyed, 'Expected a span for the destroyed stream');
+      assert.strictEqual(destroyed.status.code, 2); // STATUS_ERROR
+    } finally {
+      await next.close();
+    }
   });
 
   it('ends an aborted stream with error status', async () => {
