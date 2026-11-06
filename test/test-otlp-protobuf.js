@@ -302,3 +302,19 @@ test('sizing rejects invalid timestamps before writing and isolates malformed sp
   assert.equal(errors.length, 1);
   assert.deepEqual(buffer.subarray(5), referenceRequest([referenceSpan()]));
 });
+
+test('resource attributes preserve boolean and double values', () => {
+  const { OtlpEncoder } = require('../lib/otlp');
+  const resource = {
+    attributes: [
+      { key: 'enabled', value: { boolValue: true } },
+      { key: 'ratio', value: { doubleValue: 1.5 } },
+      { key: 'large', value: { doubleValue: 1e30 } },
+    ],
+  };
+  const scope = { name: 'test', version: '0' };
+  assert.deepEqual(
+    new OtlpEncoder(resource, scope).encode([makeSpan()]).subarray(5),
+    referenceRequest([referenceSpan()], resource, scope),
+  );
+});

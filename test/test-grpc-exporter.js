@@ -9,6 +9,7 @@ const { fixture, spawnMicrotel } = require('./common/otel');
 async function run(
   t,
   {
+    explicitFlush = false,
     secure = false,
     status = '0',
     partial = false,
@@ -23,6 +24,7 @@ async function run(
       })
     : http2.createServer();
   const payloads = [];
+  const requests = [];
   const sessions = new Set();
   server.on('session', (s) => {
     sessions.add(s);
@@ -33,6 +35,7 @@ async function run(
     server.close();
   });
   server.on('stream', (stream, headers) => {
+    requests.push(headers);
     const chunks = [];
     stream.on('error', () => {});
     stream.on('data', (chunk) => chunks.push(chunk));
@@ -63,7 +66,21 @@ async function run(
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const result = await spawnMicrotel(
     [
-      fixture('beforeexit-flush-child.js'),
+      ...(explicitFlush
+        ? [
+            '-e',
+            `
+        const otel = require(process.env.MICROTEL_PATH);
+        otel.init(JSON.parse(process.argv[1]));
+        const { Span } = require(process.env.MICROTEL_PATH + '/lib/span');
+        const { addSpan } = require(process.env.MICROTEL_PATH + '/lib/flush');
+        const span = new Span('test', 1);
+        span.endTime = span.startTime + 1;
+        addSpan(span);
+        otel.flush().then(() => process.exit(0));
+      `,
+          ]
+        : [fixture('beforeexit-flush-child.js')]),
       JSON.stringify({
         protocol: 'grpc',
         endpoint: `${secure ? 'https' : 'http'}://localhost:${server.address().port}`,
@@ -73,7 +90,7 @@ async function run(
     secure ? { NODE_EXTRA_CA_CERTS: fixture('https-cert.pem') } : {},
     { timeout: 5000 },
   );
-  return { ...result, payloads };
+  return { ...result, payloads, requests };
 }
 
 for (const secure of [false, true]) {
@@ -132,4 +149,19 @@ test('an in-process gRPC collector is excluded from tracing', async () => {
   );
   assert.equal(result.code, 0, result.stderr);
   assert.equal(result.stderr, '');
+});
+
+test('gRPC forwards configured export headers', async (t) => {
+  const result = await run(t, {
+    options: { headers: { authorization: 'Bearer test' } },
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.requests[0].authorization, 'Bearer test');
+});
+
+test('explicit flush waits for gRPC exports before resolving', async (t) => {
+  const result = await run(t, { explicitFlush: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.equal(result.payloads.length, 1);
 });
