@@ -14,8 +14,10 @@ const listen = (server) =>
 const close = (server) => new Promise((resolve) => server.close(resolve));
 
 // Starts, when tracing, a dummy collector: the measurement then covers
-// span creation, serialization, and the export round trip.
-async function startCollector({ tracing }) {
+// span creation, serialization, and the export round trip. A sampleRatio
+// of 0 traces requests without exporting anything, so it measures the
+// work a request that only propagates its context pays for.
+async function startCollector({ tracing, sampleRatio }) {
   if (!tracing) return null;
 
   const collector = http.createServer((req, res) => {
@@ -23,7 +25,10 @@ async function startCollector({ tracing }) {
     res.end();
   });
   await listen(collector);
-  microtel.init({ endpoint: `http://127.0.0.1:${collector.address().port}` });
+  microtel.init({
+    endpoint: `http://127.0.0.1:${collector.address().port}`,
+    sampleRatio,
+  });
   return collector;
 }
 
@@ -38,8 +43,8 @@ async function startTargetServer() {
 
 // Sets up a local target server, a keep-alive agent for the load, and,
 // when tracing, a dummy collector.
-async function setup({ tracing = false } = {}) {
-  const collector = await startCollector({ tracing });
+async function setup({ tracing = false, sampleRatio } = {}) {
+  const collector = await startCollector({ tracing, sampleRatio });
   const server = await startTargetServer();
 
   const port = server.address().port;
@@ -69,13 +74,13 @@ async function setup({ tracing = false } = {}) {
 // keep-alive connection, so the traced/untraced difference reflects
 // per-request work (two spans per request), not scheduling or connection
 // noise.
-function registerHttpBenchmark(name, { tracing = false } = {}) {
+function registerHttpBenchmark(name, { tracing = false, sampleRatio } = {}) {
   const kRequestsPerSample = 200;
 
   let ctx;
 
   before(async () => {
-    ctx = await setup({ tracing });
+    ctx = await setup({ tracing, sampleRatio });
   });
 
   after(() => ctx.close());
@@ -93,7 +98,7 @@ function registerHttpBenchmark(name, { tracing = false } = {}) {
 // Requests are sequential over the pooled connection, so the
 // traced/untraced difference reflects per-request work (two spans per
 // request), not scheduling or connection noise.
-function registerFetchBenchmark(name, { tracing = false } = {}) {
+function registerFetchBenchmark(name, { tracing = false, sampleRatio } = {}) {
   const kRequestsPerSample = 200;
 
   let server;
@@ -101,7 +106,7 @@ function registerFetchBenchmark(name, { tracing = false } = {}) {
   let url;
 
   before(async () => {
-    collector = await startCollector({ tracing });
+    collector = await startCollector({ tracing, sampleRatio });
     server = await startTargetServer();
     url = `http://127.0.0.1:${server.address().port}/bench`;
   });

@@ -3,11 +3,13 @@
 const assert = require('node:assert');
 const http = require('node:http');
 const { after, before, describe, it } = require('node:test');
+const { Span, SPAN_KIND_SERVER } = require('../lib/span');
 const {
   startTracing,
   startOTelCollector,
   startHTTPServer,
   flushAndCollect,
+  getSpans,
   httpGet,
   rawRequest,
   fixture,
@@ -144,5 +146,101 @@ describe('otel sampling', () => {
     assert.strictEqual(zeroCollector.requests.length, 0);
 
     await zeroCollector.close();
+  });
+
+  it('gives an unsampled span no export state', () => {
+    const span = new Span('GET', SPAN_KIND_SERVER, {
+      parent: {
+        traceId: '1'.repeat(32),
+        spanId: '2'.repeat(16),
+        traceFlags: 0,
+      },
+    });
+    span.setAttribute('http.request.method', 'GET');
+    span.addEvent('exception', { 'exception.message': 'boom' });
+    span.end();
+
+    assert.strictEqual(span.isSampled, false);
+    assert.strictEqual(span.startTime, undefined);
+    assert.strictEqual(span.getAttributes(), undefined);
+    assert.deepStrictEqual(span.getEvents(), []);
+    assert.strictEqual(span.endTime, 0);
+  });
+
+  it('skips export-only work while unsampled requests propagate', async () => {
+    // A child process, since this file already used its one activation.
+    // The fixture drives a sampled and an unsampled request through an
+    // HTTP frontend, an unsampled fetch, and an unsampled HTTP/2 stream,
+    // and reports what each hop saw.
+    const zeroCollector = await startOTelCollector();
+    const { code, stdout, stderr } = await spawnMicrotel([
+      fixture('unsampled-child.js'),
+      JSON.stringify({
+        endpoint: `http://127.0.0.1:${zeroCollector.port}`,
+        sampleRatio: 0,
+      }),
+    ]);
+
+    assert.strictEqual(code, 0, stderr);
+    try {
+      const { saw, listeners, stashed } = JSON.parse(
+        stdout.trim().split('\n').pop(),
+      );
+
+      // The HTTP/2 stream and the fetch hold no span for the export-only
+      // handlers to find.
+      assert.deepStrictEqual(stashed, { '/h2': false, '/fetch': false });
+
+      // A sampled request gets microtel's own listeners: one 'close' on
+      // the server response, one 'end' and one 'close' on the client
+      // response. An unsampled request gets none, the same counts as a
+      // process without tracing.
+      assert.strictEqual(listeners['/sampled'].serverClose, 1);
+      assert.strictEqual(listeners['/sampled'].clientEnd, 2);
+      assert.strictEqual(listeners['/sampled'].clientClose, 1);
+      assert.strictEqual(listeners['/unsampled'].serverClose, 0);
+      assert.strictEqual(listeners['/unsampled'].clientEnd, 1);
+      assert.strictEqual(listeners['/unsampled'].clientClose, 0);
+
+      // Context still propagates on the unsampled requests: the outgoing
+      // traceparent carries the incoming trace ID and flags, and the
+      // span's inherited tracestate and baggage replace the stale headers
+      // the caller sent.
+      assert.match(
+        saw['/unsampled'].traceparent,
+        RegExp(`^00-${'2'.repeat(32)}-[0-9a-f]{16}-02$`),
+      );
+      assert.strictEqual(saw['/unsampled'].tracestate, 'kept=yes');
+      assert.strictEqual(saw['/unsampled'].baggage, 'kept=yes');
+      assert.strictEqual(saw['/sampled'].tracestate, 'kept=yes');
+
+      // An HTTP/2 stream span is current while its stream is handled, so
+      // the request it makes carries the stream's trace ID and flags.
+      assert.match(
+        saw['/h2-hop'].traceparent,
+        RegExp(`^00-${'3'.repeat(32)}-[0-9a-f]{16}-02$`),
+      );
+
+      // A fetch with no trace context of its own starts a fresh
+      // unsampled trace, and the stale propagation headers the caller
+      // sent are removed rather than carried into it.
+      assert.match(
+        saw['/fetch'].traceparent,
+        /^00-[0-9a-f]{32}-[0-9a-f]{16}-02$/,
+      );
+      assert.strictEqual(saw['/fetch'].tracestate, undefined);
+      assert.strictEqual(saw['/fetch'].baggage, undefined);
+
+      // The child has exited, so any export it started has completed.
+      // Only the request that arrived sampled exported anything.
+      const exported = new Set();
+      for (const payload of zeroCollector.payloads)
+        for (const span of getSpans(payload)) exported.add(span.traceId);
+      assert.deepEqual([...exported], ['7'.repeat(32)]);
+    } finally {
+      // Closed even when an assertion fails, so the server does not
+      // keep the process alive.
+      await zeroCollector.close();
+    }
   });
 });
