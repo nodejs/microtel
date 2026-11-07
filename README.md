@@ -98,12 +98,19 @@ process.on('SIGTERM', async () => {
 
 A flush that times out rejects, and the `finally` exits anyway.
 
+### Context
+
+`context` reads and sets the [Context](https://opentelemetry.io/docs/specs/otel/context/)
+microtel propagates. See [docs/context.md](./docs/context.md).
+
 ## Instrumented operations
 
 When tracing is active, spans are created automatically for the following
 operations. Per the OpenTelemetry [semantic conventions](https://opentelemetry.io/docs/specs/semconv/http/http-spans/), span
 names must be low cardinality. Node.js core has no route concept, so spans are
-named `{method}` and the request details live in the attributes. Requests the
+named `{method}` and the request details live in the attributes. A server span
+is named `{method} {target}` when a framework sets the target through
+[`context.setTarget()`](./docs/context.md#contextsettargetctx-target). Requests the
 exporter itself sends to the collector's export path are never traced, on
 either side; other requests, including other requests to the collector's
 host, are.
@@ -135,6 +142,7 @@ Attributes set on server spans:
 | `network.protocol.version`  | HTTP version (e.g. `1.1`)        | Always                        |
 | `user_agent.original`        | Client `User-Agent` header       | When the header is present    |
 | `http.response.status_code` | Response status code             | When response finishes        |
+| `http.route`                | The target a framework set       | When a target is set          |
 | `error.type`                | HTTP status code as string       | On 5xx responses              |
 
 The address attributes follow the proxy headers the way OpenTelemetry's
@@ -180,6 +188,7 @@ Attributes set on HTTP/2 server spans:
 | `network.protocol.version`  | `2.0`                            | Always                        |
 | `user_agent.original`        | Client `User-Agent` header       | When the header is present    |
 | `http.response.status_code` | Response status code             | When the response is sent     |
+| `http.route`                | The target a framework set       | When a target is set          |
 | `error.type`                | HTTP status code as string       | On 5xx responses              |
 
 The address attributes follow the same rules as for HTTP/1 server
