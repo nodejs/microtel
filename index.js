@@ -13,7 +13,7 @@ const {
   getCurrentContext,
   getTarget,
   getTraceContext,
-  registerAdapter,
+  setAdapter,
   setTarget,
 } = require('./lib/context');
 
@@ -25,7 +25,7 @@ module.exports = {
     active: getCurrentContext,
     getTarget,
     getTraceContext,
-    registerAdapter,
+    setAdapter,
     setTarget,
   },
 };

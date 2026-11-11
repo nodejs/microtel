@@ -101,9 +101,7 @@ class MicrotelContextManager {
   #store;
 
   constructor(microtel) {
-    this.#store = microtel.context.registerAdapter(
-      new MicrotelContextAdapter(),
-    );
+    this.#store = microtel.context.setAdapter(new MicrotelContextAdapter());
   }
 
   active() {

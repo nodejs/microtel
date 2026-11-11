@@ -1,11 +1,11 @@
 # Context
 
-microtel propagates a [Context] across async execution. microtel sets its
-values while tracing is active, or a registered adapter can supply them. This
+microtel propagates a [Context][] across async execution. microtel sets its
+values while tracing is active, or an adapter can supply them. This
 document has two sections, for different readers of the API:
 
 - [API consumers](#api-consumers), such as web frameworks and logging
-  libraries, read and set values in the current Context.
+  libraries, read values from the current Context.
 - [Context adapters](#context-adapters) get and set microtel's values in
   another implementation's Context objects, so both share one current
   Context.
@@ -15,7 +15,7 @@ document has two sections, for different readers of the API:
 `microtel.context` holds a closed set of values, each with its own accessor.
 There is no string-keyed access. Libraries that need other values keep them
 in their own `AsyncLocalStorage`. These functions work the same whichever
-adapter is registered.
+adapter is set.
 
 Each accessor takes the Context to read or write. Get the current Context
 once with `context.active()` and pass it to every accessor you call:
@@ -37,12 +37,12 @@ directly.
 
 A read-only object. Modifying any of its fields is undefined behavior.
 
-- `traceId` {string} The [trace-id].
-- `spanId` {string} The span's ID, propagated as the [parent-id].
-- `traceFlags` {number} The [trace-flags].
-- `traceState` {Object|undefined} The [tracestate header], as an object with:
+- `traceId` {string} The [trace-id][].
+- `spanId` {string} The span's ID, propagated as the [parent-id][].
+- `traceFlags` {number} The [trace-flags][].
+- `traceState` {Object|undefined} The [tracestate header][], as an object with:
   - `serialize()` Returns: {string} The header.
-- `isRemote` {boolean|undefined} [IsRemote], `true` when the trace context
+- `isRemote` {boolean|undefined} [IsRemote][], `true` when the trace context
   came from another process.
 
 ### `context.getTraceContext(ctx)`
@@ -77,8 +77,8 @@ each incoming request it traces. Only the code that resolved the target, such
 as a framework's router, should set it.
 
 The target is the low-cardinality part of a span name that says what the
-operation acts on, like `{target}` in an [HTTP span name], the method in an
-[RPC span name], or `{destination}` in a [messaging span name].
+operation acts on, like `{target}` in an [HTTP span name][], the method in an
+[RPC span name][], or `{destination}` in a [messaging span name][].
 
 ## Context adapters
 
@@ -100,7 +100,7 @@ Two objects with separate roles handle Contexts:
 microtel starts with a default adapter, whose Contexts hold only microtel's
 values, and a store of its own.
 
-### `context.registerAdapter(adapter)`
+### `context.setAdapter(adapter)`
 
 - `adapter` {Object} An [adapter](#adapter-interface).
 
@@ -116,7 +116,7 @@ worker. A second call throws `ERR_INVALID_STATE`.
 
 ### Adapter interface
 
-An adapter implements the Context API's [Get value] and [Set value] for
+An adapter implements the Context API's [Get value][] and [Set value][] for
 microtel's [keys](#keys).
 
 #### `adapter.getValue(context, key)`
@@ -157,7 +157,7 @@ until the operation ends.
 
 ### Store
 
-The store's methods are the Context API's [optional global operations].
+The store's methods are the Context API's [optional global operations][].
 
 #### `store.active()`
 

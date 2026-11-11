@@ -56,7 +56,7 @@ describe('otel context adapter', () => {
 
   it('refuses a second adapter', () => {
     assert.throws(
-      () => microtel.context.registerAdapter({ getValue() {}, setValues() {} }),
+      () => microtel.context.setAdapter({ getValue() {}, setValues() {} }),
       { code: 'ERR_INVALID_STATE' },
     );
   });
