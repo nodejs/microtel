@@ -13,7 +13,7 @@ const {
   spanAttrs,
   closeAll,
 } = require('./common/otel');
-const { getSpanStorage } = require('../lib/core');
+const { getCurrentContext } = require('../lib/context');
 
 // Starts a plain HTTP/2 server for traced requests. The handler receives
 // (stream, headers). Exposes port and close().
@@ -443,9 +443,9 @@ describe('otel HTTP/2 server spans', () => {
     let currentAfterUnsampledStart;
     const onStart = ({ headers }) => {
       if (headers?.[':path'] === '/destroyed')
-        currentAfterStart = getSpanStorage().getStore();
+        currentAfterStart = getCurrentContext();
       if (headers?.[':path'] === '/destroyed-unsampled')
-        currentAfterUnsampledStart = getSpanStorage().getStore();
+        currentAfterUnsampledStart = getCurrentContext();
     };
     dc.subscribe('http2.server.stream.start', onStart);
     const warnings = [];
@@ -491,13 +491,11 @@ describe('otel HTTP/2 server spans', () => {
     );
     // The ended span must not be left current: no handler runs for the
     // destroyed stream, and later subscribers share this context.
-    assert.strictEqual(
-      currentAfterStart?.endTime,
-      undefined,
+    assert.ok(
+      currentAfterStart == null,
       'The ended span must not be left current',
     );
-    // An unsampled destroyed stream leaves no span current either. Its
-    // span never ended, so the endTime check above could not tell.
+    // An unsampled destroyed stream leaves no span current either.
     assert.ok(
       currentAfterUnsampledStart == null,
       'The unsampled destroyed span must not be left current',

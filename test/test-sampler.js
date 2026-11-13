@@ -79,7 +79,10 @@ describe('otel root sampler', () => {
       const sampled = span.traceId.slice(18) >= '80000000000000';
       decisions.add(sampled);
       assert.strictEqual(span.traceFlags, sampled ? 0x03 : 0x02);
-      assert.strictEqual(span.tracestate, sampled ? 'ot=th:8' : undefined);
+      assert.strictEqual(
+        span.traceState?.serialize(),
+        sampled ? 'ot=th:8' : undefined,
+      );
       assert.ok(span.toTraceparent().endsWith(sampled ? '-03' : '-02'));
     }
     assert.strictEqual(decisions.size, 2);
@@ -94,7 +97,7 @@ describe('otel root sampler', () => {
       });
       const child = new Span('GET', SPAN_KIND_CLIENT, { parent });
       assert.strictEqual(child.traceFlags, traceFlags);
-      assert.strictEqual(child.tracestate, 'vendor=state');
+      assert.strictEqual(child.traceState.serialize(), 'vendor=state');
     }
   });
 });
