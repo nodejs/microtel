@@ -109,8 +109,8 @@ When tracing is active, spans are created automatically for the following
 operations. Per the OpenTelemetry [semantic conventions](https://opentelemetry.io/docs/specs/semconv/http/http-spans/), span
 names must be low cardinality. Node.js core has no route concept, so spans are
 named `{method}` and the request details live in the attributes. A server span
-is named `{method} {target}` when a framework sets the target through
-[`context.setTarget()`](./docs/context.md#contextsettargetctx-target). Requests the
+is named `{method} {target}` when a framework sets the target on the request's
+[`Operation`](./docs/context.md#type-operation). Requests the
 exporter itself sends to the collector's export path are never traced, on
 either side; other requests, including other requests to the collector's
 host, are.

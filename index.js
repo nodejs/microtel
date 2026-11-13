@@ -11,10 +11,9 @@ const { start, isActive } = require('./lib/core');
 const { flush } = require('./lib/flush');
 const {
   getCurrentContext,
-  getTarget,
+  getOperation,
   getTraceContext,
   setAdapter,
-  setTarget,
 } = require('./lib/context');
 
 module.exports = {
@@ -23,9 +22,8 @@ module.exports = {
   flush,
   context: {
     active: getCurrentContext,
-    getTarget,
+    getOperation,
     getTraceContext,
     setAdapter,
-    setTarget,
   },
 };

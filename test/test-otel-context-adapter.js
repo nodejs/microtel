@@ -68,7 +68,9 @@ describe('otel context adapter', () => {
       activeSpanContext = trace.getActiveSpan().spanContext();
       // Framework instrumentations report the route this way.
       getRPCMetadata(context.active()).route = '/users/:id';
-      microtelTarget = microtel.context.getTarget(microtel.context.active());
+      microtelTarget = microtel.context.getOperation(
+        microtel.context.active(),
+      ).target;
       tracer.startActiveSpan('work', async (work) => {
         await httpGet(backend.port, '/down');
         work.end();

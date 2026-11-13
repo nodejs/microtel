@@ -20,18 +20,8 @@ describe('context outside a request', () => {
     const ctx = context.active();
     assert.strictEqual(ctx, undefined);
     assert.strictEqual(context.getTraceContext(ctx), undefined);
-    assert.strictEqual(context.getTarget(ctx), undefined);
-    assert.strictEqual(context.setTarget(ctx, '/a'), false);
+    assert.strictEqual(context.getOperation(ctx), undefined);
     assert.strictEqual(context.getTraceContext(null), undefined);
-  });
-
-  it('validates the target', () => {
-    assert.throws(() => context.setTarget(undefined, 1), {
-      code: 'ERR_INVALID_ARG_TYPE',
-    });
-    assert.throws(() => context.setTarget(undefined, ''), {
-      code: 'ERR_INVALID_ARG_VALUE',
-    });
   });
 });
 
@@ -56,8 +46,8 @@ describe('context with tracing', () => {
     const frontend = await startHTTPServer(async (req, res) => {
       const ctx = context.active();
       traceContext = context.getTraceContext(ctx);
-      context.setTarget(ctx, '/users/:id');
-      target = context.getTarget(ctx);
+      context.getOperation(ctx).target = '/users/:id';
+      target = context.getOperation(ctx).target;
       await httpGet(backend.port, '/child');
       res.end('ok');
     });

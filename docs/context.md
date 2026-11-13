@@ -17,13 +17,17 @@ There is no string-keyed access. Libraries that need other values keep them
 in their own `AsyncLocalStorage`. These functions work the same whichever
 adapter is set.
 
-Each accessor takes the Context to read or write. Get the current Context
+A Context is immutable. No accessor changes which values a Context holds.
+A value in a Context can still be a mutable object, such as the
+[`Operation`](#type-operation).
+
+Each accessor takes the Context to read. Get the current Context
 once with `context.active()` and pass it to every accessor you call:
 
 ```js
 const ctx = context.active();
 const traceContext = context.getTraceContext(ctx);
-const target = context.getTarget(ctx);
+const operation = context.getOperation(ctx);
 ```
 
 ### `context.active()`
@@ -53,32 +57,34 @@ A read-only object. Modifying any of its fields is undefined behavior.
 Returns the trace context of the span in `ctx`, or `undefined` when it
 has none.
 
-### `context.getTarget(ctx)`
+### Type: `Operation`
 
-- `ctx` {any} A Context from `context.active()`.
-- Returns: {string|undefined}
+The metadata of the operation being traced. microtel puts an Operation in the
+Context of each incoming request it traces. Every Context derived while the
+operation is traced shares it, so a value set on it stays visible until the
+operation ends.
 
-Returns the target of the operation being traced in `ctx`. It is a
-low-cardinality name for what the operation is performed against, such as
-the route template `/users/:id`. Returns `undefined` when none was set or
-`ctx` has no operation.
-
-### `context.setTarget(ctx, target)`
-
-- `ctx` {any} A Context from `context.active()`.
-- `target` {string} A low-cardinality name for what the operation is
-  performed against, such as the route template `/users/:id`.
-- Returns: {boolean}
-
-Sets the target of the operation being traced in `ctx`, which microtel
-records on the operation's span. Returns `false` when `ctx` has no
-operation, and `true` otherwise. microtel puts an operation in the Context of
-each incoming request it traces. Only the code that resolved the target, such
-as a framework's router, should set it.
+- `target` {string|undefined} A low-cardinality name for what the operation
+  is performed against, such as the route template `/users/:id`. microtel
+  reads it when the operation's span ends, and records it on the span when it
+  is a non-empty string. Only the code that resolved the target, such as a
+  framework's router, should set it.
 
 The target is the low-cardinality part of a span name that says what the
 operation acts on, like `{target}` in an [HTTP span name][], the method in an
 [RPC span name][], or `{destination}` in a [messaging span name][].
+
+### `context.getOperation(ctx)`
+
+- `ctx` {any} A Context from `context.active()`.
+- Returns: {Operation|undefined}
+
+Returns the operation being traced in `ctx`, or `undefined` when it has none.
+
+```js
+const operation = context.getOperation(context.active());
+if (operation) operation.target = '/users/:id';
+```
 
 ## Context adapters
 
@@ -138,22 +144,12 @@ value is `undefined`.
 #### Keys
 
 - `traceContext` The trace context `context.getTraceContext()` returns.
-- `operation` {Operation} The metadata of the operation being traced. See
-  [`Operation`](#type-operation).
+- `operation` {Operation} The [`Operation`](#type-operation)
+  `context.getOperation()` returns.
 
 microtel may set other keys. An adapter maps the keys it understands onto its
 own Context and stores the rest as they are, so a key microtel adds needs no
 change to the adapter.
-
-#### Type: `Operation`
-
-The metadata of the operation being traced. It is shared by every Context
-derived while the operation is traced, so a value set on it stays visible
-until the operation ends.
-
-- `target` {string|undefined} See
-  [`context.getTarget()`](#contextgettargetctx). microtel reads it when the
-  operation's span ends, and `context.setTarget()` writes it.
 
 ### Store
 
