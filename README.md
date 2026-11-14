@@ -48,17 +48,17 @@ request it happened on carries on untraced or partly traced.
 
 | Option           | Type   | Default                      | Description |
 | ---------------- | ------ | ---------------------------- | ----------- |
-| `endpoint`       | string | `http://localhost:4318`      | Base URL of an OTLP/HTTP collector. Only `http:` and `https:` URLs are accepted. `/v1/traces` is appended to the endpoint's existing path. An endpoint already ending with `/v1/traces` is used as is. |
-| `serviceName`    | string | `unknown_service:node`      | Service name in exported resource attributes. The default follows the OpenTelemetry [semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/trace/) for low-cardinality service names. |
+| `endpoint`       | string | `http://localhost:4318`      | Base URL of an OTLP/HTTP collector. Only `http:` and `https:` URLs are accepted. `/v1/traces` is appended to the endpoint's existing path. An endpoint already ending with `/v1/traces` is used as is. The default is the [OTLP exporter's](https://opentelemetry.io/docs/specs/otel/protocol/exporter/#configuration-options). |
+| `serviceName`    | string | `unknown_service:` and the executable's base name, such as `unknown_service:node` | Service name in exported resource attributes. The default is the [`service.name`](https://opentelemetry.io/docs/specs/semconv/registry/attributes/service/#service-name) fallback the semantic conventions require. |
 | `sdkName`        | string | `microtel`                   | `telemetry.sdk.name` resource attribute, and the name of the instrumentation scope on exported spans. |
 | `sdkVersion`    | string | this package's version      | `telemetry.sdk.version` resource attribute, and the scope version. |
 | `resourceAttributes` | object | none                  | Additional attributes in the exported resource, replacing microtel's values for the same keys. Values must be strings, booleans, or finite numbers. `service.name`, `telemetry.sdk.name`, and `telemetry.sdk.version` are refused: use `serviceName`, `sdkName`, and `sdkVersion` instead. Other `telemetry.sdk.*` keys are refused because microtel sets them. The object is copied at init, so changing it afterwards has no effect. |
 | `filter`         | string | all modules                  | Comma-separated list of modules to instrument. Supported values: `node:http`, `node:http/client`, `node:http/server`, `node:http2`, `node:http2/server`, and `node:undici`. `node:http` covers `node:http/client` and `node:http/server`; `node:http2` covers `node:http2/server`. `node:fetch` is an alias for `node:undici`: both cover all undici requests, including `fetch()`, and either one enables them. |
 | `exclude`        | string | none                         | Comma-separated list of modules to exclude from instrumentation. Same values as `filter`; takes precedence over it. |
-| `maxBufferSize`  | number | `100`                        | Number of spans buffered before an immediate flush is triggered. Must be a positive integer. |
-| `flushInterval`  | number | `10000`                      | Milliseconds between periodic flushes. Must be a positive integer. |
-| `exportTimeout`  | number | `10000`                      | Milliseconds to wait for a collector response before an export is failed. Must be a positive integer. |
-| `sampleRatio`    | number | `1`                          | Probability, from 0 to 1, that a trace this process starts is sampled. Requests that arrive with a `traceparent` keep its decision instead. See [Sampling](#sampling). |
+| `maxBufferSize`  | number | `512`                        | Number of spans buffered before an immediate flush is triggered. Must be a positive integer. The default is the batching processor's [`maxExportBatchSize`](https://opentelemetry.io/docs/specs/otel/trace/sdk/#batching-processor). |
+| `flushInterval`  | number | `5000`                       | Milliseconds between periodic flushes. Must be a positive integer. The default is the batching processor's [`scheduledDelayMillis`](https://opentelemetry.io/docs/specs/otel/trace/sdk/#batching-processor). |
+| `exportTimeout`  | number | `10000`                      | Milliseconds to wait for a collector response before an export is failed. Must be a positive integer. The default is the [OTLP exporter's](https://opentelemetry.io/docs/specs/otel/protocol/exporter/#configuration-options) timeout. |
+| `sampleRatio`    | number | `1`                          | Probability, from 0 to 1, that a trace this process starts is sampled. Requests that arrive with a `traceparent` keep its decision instead. See [Sampling](#sampling). The default matches the spec's default [`parentbased_always_on`](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#general-sdk-configuration) sampler. |
 | `headers`        | object | none                         | Header names mapped to string values, sent with every export request, such as an API key a hosted backend requires. `content-type`, `content-length`, `host`, `transfer-encoding`, `trailer`, and `connection` are refused at any letter case, since microtel manages them itself. The object is copied at init. |
 
 Every exported span shares one resource. It carries the service identity, a
@@ -343,7 +343,7 @@ is called explicitly are lost, because explicit exits do not run the exit-time
 flush. Awaiting `flush()` before the exit sends them.
 
 A span keeps at most 128 distinct attributes, the OpenTelemetry SDK's default
-`attributeCountLimit`. Writes to a key the span already has always land. A new
+[`AttributeCountLimit`](https://opentelemetry.io/docs/specs/otel/trace/sdk/#span-limits). Writes to a key the span already has always land. A new
 key past the limit is dropped and counted, and the count is exported with the
 span as the `droppedAttributesCount` OTLP field.
 
